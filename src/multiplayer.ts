@@ -19,7 +19,8 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   const leaveControl = document.querySelector<HTMLElement>('#leave-room-panel')!;
   const restoreControls = () => {
     const home = solo.hidden ? document.querySelector('#session-controls-fallback')! : controlsHome;
-    home.append(inviteControl, leaveControl);
+    home.prepend(inviteControl);
+    home.append(leaveControl);
   };
   const emulated = import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true';
   let config: FirebaseOptions;
@@ -49,7 +50,8 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     await setPersistence(auth, browserLocalPersistence);
     await auth.authStateReady();
     if (!auth.currentUser) await signInAnonymously(auth);
-  } catch {
+  } catch (error) {
+    console.warn('Multiplayer sign-in failed', (error as {code?: string}).code ?? 'unknown');
     root.className = 'how-panel';
     root.innerHTML = '<h2 class="section-label">MULTIPLAYER CONNECTION UNAVAILABLE</h2><p class="awards-intro">Keep playing solo. Start the Firebase emulators with npm run emulators, then reload. Anonymous sign-in also needs browser storage. For cloud play, check the Firebase configuration and enabled anonymous authentication.</p>';
     return { onNextCard: async () => false };
@@ -130,6 +132,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   }
   function renderJoin() {
     restoreControls();
+    document.querySelector(!roomId && !solo.hidden ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
     root.innerHTML = `<section class="how-panel"><h2 class="section-label">${roomId ? 'JOIN THIS SESSION' : 'INVITE A PLAYER'}</h2><p class="awards-intro">${roomId ? 'Join with a display name. You’ll wait for the next card before playing.' : 'Keep your current solo card. Invited players join the next card when you choose New Card.'}</p><form id="join-session" class="session-form"><label for="player-name">Your display name</label><input id="player-name" maxlength="32" required autocomplete="nickname" placeholder="e.g. Captain Nova"><button type="submit" class="new-card" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : roomId ? 'Join session' : 'Show invite QR & link'}</button></form><p class="session-message" role="status">${escape(message)}</p></section>`;
     root.querySelector('form')!.addEventListener('submit', async event => {
       event.preventDefault();
@@ -157,6 +160,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     clearTimeout(expiryTimer);
     if (room.expiresAt && !sessionExpired) expiryTimer = setTimeout(render, Math.max(1, room.expiresAt - Date.now()));
     const hostInviting = !sessionExpired && room.phase === 'inviting' && room.creator === uid;
+    document.querySelector(hostInviting ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
     solo.hidden = !hostInviting;
     inviteControl.querySelector('p')!.textContent = room.phase === 'shared'
       ? 'Invite more players. They’ll wait for the next shared round.'

@@ -24,7 +24,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span class="system-tag"><span></span>STARFINDER · SECOND EDITION</span>
       </div>
       <div id="session-controls-fallback"></div>
-      <section id="multiplayer" hidden aria-label="Group session"></section>
+      <div id="shared-panel-home"><section id="multiplayer" hidden aria-label="Group session"></section></div>
       <section id="solo-game"><p id="expiry-notice" class="session-message" role="status"></p>
       <div class="game-layout grid gap-5 md:grid-cols-[1fr_260px]">
         <section class="card-panel" aria-label="Bingo card">
@@ -42,6 +42,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <section class="roll-panel" aria-labelledby="roll-heading"><p class="eyebrow" id="roll-heading">LET FATE DECIDE</p><button id="roll" class="die-button" aria-label="Roll a twenty-sided die" type="button">${die}<span id="die-face">20</span></button><p class="roll-title">Roll a d20</p><p id="roll-help" class="muted">Matching numbers mark together.</p><div class="roll-result" role="status" aria-live="polite" aria-atomic="true"><span class="section-label">LAST ROLL</span><strong id="last-roll">—</strong><span id="roll-count">Ready when you are</span></div></section>
       <div id="session-controls-home">
       <div class="invite-entry"><button id="invite-player" class="new-card" type="button">▦ Invite a player · Show QR / session link</button><p>Keep playing solo while invited players wait for your next card.</p></div>
+      <div id="solo-invite-form"></div>
       <div id="leave-room-panel" class="leave-room-panel" hidden><button id="leave-room" class="new-card" type="button">Leave room · Return to solo</button><p class="prize-help">Return to your saved solo card. Create another session with Invite a player.</p></div>
       </div>
           <section class="how-panel"><h2 class="section-label">HOW TO PLAY</h2><ol><li><span>01</span><p>Roll here, or tap a number to mark or unmark every match.</p></li><li><span>02</span><p>Complete this card’s winning pattern. The center is always free.</p></li><li><span>03</span><p>Bingo locks your card. Keep rolling, or start a new card.</p></li></ol></section>
@@ -138,10 +139,12 @@ let multiplayer: { onNextCard(): Promise<boolean>; leave?(): void } | undefined;
 let inviteEpoch = 0;
 async function invite() {
   const root = document.querySelector<HTMLElement>('#multiplayer')!; root.hidden = false;
+  if (!new URLSearchParams(location.search).has('session') && !document.querySelector<HTMLElement>('#solo-game')!.hidden) {
+    document.querySelector('#solo-invite-form')!.append(root);
+  }
   document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = false;
   if (document.querySelector<HTMLElement>('#solo-game')!.hidden) {
-    const home = document.querySelector('#session-controls-home')!;
-    document.querySelector('#session-controls-fallback')!.append(...Array.from(home.children));
+    document.querySelector('#session-controls-fallback')!.append(document.querySelector('.invite-entry')!, document.querySelector('#leave-room-panel')!);
   }
   if (multiplayer) return;
   const epoch = ++inviteEpoch;

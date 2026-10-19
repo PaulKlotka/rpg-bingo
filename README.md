@@ -2,7 +2,7 @@
 
 A phone-friendly bingo companion for Starfinder Second Edition. Built with plain TypeScript, Tailwind CSS, and Vite, without a UI framework. Single-player runs locally with browser saving. Optional shared play uses anonymous Firebase Authentication, Firestore, and a trusted callable function. No account signup or analytics.
 
-**Multiplayer setup, architecture, and manual cloud deployment:** see [MULTIPLAYER.md](MULTIPLAYER.md). Local emulator operation is prepared and tested; nothing has been deployed to Firebase.
+**Multiplayer setup, architecture, and manual cloud deployment:** see [MULTIPLAYER.md](MULTIPLAYER.md). Production project: `rpg-bingo-paul`. See the deployment status below.
 
 ## Play locally
 
@@ -45,41 +45,15 @@ Each prize grants **+1 to one qualifying roll**, declared before rolling, usable
 
 The **Won Prizes** section gains exactly one independent entry when a card first wins. Offered but unearned prizes are not listed. Each entry has a reversible **Mark used / Used · Undo** button. Winning the same prize on different cards creates separate entries. New Card preserves all earned entries and their used states. Refreshing a won card does not award its prize again.
 
-Expiry is handled at the table: the app does not infer session boundaries or automatically clear prizes. Saved progress remains until browser data is removed. The used control records your own use of the bonus; it does not modify the bingo die or any Starfinder roll.
+Sessions and unused prizes expire after 24 hours without game activity. Refreshing does not extend the deadline. The used control records your own use of the bonus; it does not modify the bingo die or any Starfinder roll.
 
-## Manual Firebase Hosting deployment (single-player only)
+## Firebase production deployment
 
-**Prepared only: no Firebase project has been created, project ID availability has not been checked, and nothing has been deployed.** Automatic GitHub deployments are deferred; there is no deployment workflow in this repository.
+The dedicated project is `rpg-bingo-paul` (RPG Games), with approved pay-as-you-go billing. Hosting: https://rpg-bingo-paul.web.app. The default Firestore database and callable function use `us-central1`. Anonymous Authentication and domain-restricted reCAPTCHA Enterprise App Check are configured. `.firebaserc` selects this project; explicit project arguments remain recommended.
 
-1. Open the [Firebase console](https://console.firebase.google.com/) with your own Google account and create a project with display name **RPG Games**. Select an available, globally unique project ID; the display name does not reserve an ID. Record the actual ID. Single-player needs only static Hosting. Multiplayer requires the additional setup in MULTIPLAYER.md.
-2. Install the Firebase CLI and sign in:
+For updates, install both dependency sets, populate ignored `.env.production.local` as described in MULTIPLAYER.md, run the tests and `npm run build`, then run `npx firebase deploy --only firestore:rules,functions,hosting --project rpg-bingo-paul`. Production must set `VITE_USE_FIREBASE_EMULATORS=false`; the development `.env.local` is intentionally emulator-only. GitHub pushes do not automatically deploy.
 
-   ```sh
-   npm install -g firebase-tools
-   firebase login
-   firebase projects:list
-   ```
-
-3. Verify the desired project appears in the list. For a solo-only deployment, disable emulator mode in your build environment (`VITE_USE_FIREBASE_EMULATORS=false`). Build and test from this repository:
-
-   ```sh
-   npm ci
-   npm --prefix functions ci
-   npm test
-   npm run build
-   ```
-
-4. `firebase.json` already points Hosting at `dist/`. No `firebase init` is needed. When ready to publish, replace `YOUR_ACTUAL_PROJECT_ID` below with the verified ID and run:
-
-   ```sh
-   firebase deploy --only hosting --project YOUR_ACTUAL_PROJECT_ID
-   ```
-
-5. Open the Hosting URL returned by the CLI, including on your phone. Test grouped toggles, a completed winning pattern, continued rolling after bingo, and New Card. Future manual updates repeat steps 3–5.
-
-An explicit `--project` is used so there is no invented or accidentally selected default project. No `.firebaserc` is included. The hosting-only command uploads `dist/` and does not deploy the multiplayer backend. This setup uses Firebase **Hosting**, not App Hosting. Multiplayer needs the separate Functions and Firestore deployment documented in MULTIPLAYER.md.
-
-Official references: [Hosting quickstart](https://firebase.google.com/docs/hosting/quickstart), [project names and IDs](https://firebase.google.com/docs/projects/learn-more#project-id), [CLI setup](https://firebase.google.com/docs/cli#install_the_firebase_cli).
+Hosting, security rules and both Node 22 functions are deployed. The hourly cleanup job is enabled. The callable accepts browser HTTP requests while enforcing Authentication and App Check; live browser room creation is verified. Two-player cloud validation is being completed. The running game uses a separate Firestore-only service account; its build account has the explicitly approved Cloud Build role.
 
 ## Structure
 
@@ -99,12 +73,12 @@ Keyboard users can Tab to numbered squares, the die, or New Card and press Enter
 
 ## Verification completed
 
-- 36 automated solo rule, prize, inventory, and persistence tests passed. 16 additional emulator-backed, multi-client integration tests passed, including security-rule denials and concurrent transactions. TypeScript checking and the production build passed.
+- 96 automated solo, pattern, lifetime, prize, inventory, and persistence tests passed. 32 emulator-backed multi-client integration tests passed, including security-rule denials and concurrent transactions. TypeScript checking and the production build passed.
 - Development and production preview servers returned HTTP 200 locally.
 - Edge browser checks confirmed grouped marking/unmarking, die marking of matching squares, a winning row and locked controls, unchanged numbers and marks after a post-win roll, and New Card restoring 24 enabled numbered squares with only the center marked.
 - Desktop and simulated phone widths of 390 and 320 pixels were checked. The final small-phone layout has no horizontal overflow. This was browser viewport testing, not testing on a physical phone.
 - Prize-update browser checks confirmed the offered prize becoming earned, one inventory entry after a win and continued rolling, used state and card lock surviving refresh, reversible used/unused control, and New Card preserving the earned entry while offering another prize. The prize display and inventory were inspected at 390 pixels, with no horizontal overflow at 320 pixels.
-- Firebase configuration parses successfully. Actual Firebase provisioning and deployment remain unverified and have not been performed.
+- Firebase project, billing, Firestore, web app, Authentication and App Check are provisioned. Hosting is released; live multiplayer checks are tracked separately.
 - Final multiplayer browser checks confirmed the visible Invite button and QR/link, unchanged solo card/prize while a guest waits, host New Card transition, shared physical and virtual rolls, alternating controls, same anonymous player on reload, tied-win banner and fresh cards, and shared prize use/undo after reload. Shared and QR layouts fit at 390 and 320 pixel viewport widths. A physical phone and deployed cloud service have not been tested.
 
 Pattern checks in `tests/patterns.test.ts` cover all approved masks, all 66 line pairs, every selectable character, free-center handling, required targets, grouped-number wins, locks, pattern persistence and legacy saves.
@@ -117,10 +91,12 @@ Leave room is always available, including while waiting or disconnected. It retu
 
 The shared UI supports card taps and the shared die. The manual result form was removed; room information, the QR code, and the join URL are shown directly beneath the shared die.
 
-The cleanupExpiredSessions scheduled function runs hourly after cloud deployment and removes expired rooms recursively, including players, prizes, rounds and request receipts. It processes up to 20 rooms per run and retains a retry tombstone on deletion failure. The local integration suite invokes the same cleanup function directly; the demo emulator does not run the cloud schedule. No cloud deployment or scheduler activation has been performed.
+The cleanupExpiredSessions scheduled function runs hourly after cloud deployment and removes expired rooms recursively, including players, prizes, rounds and request receipts. It processes up to 20 rooms per run and retains a retry tombstone on deletion failure. The local integration suite invokes the same cleanup function directly; the demo emulator does not run the cloud schedule. Cloud scheduler activation is verified separately from the local integration suite.
 
 Final validation for patterns, departure and expiry: 96 solo/pattern/lifetime checks and 25 emulator integration checks passed, plus the production build. A two-player browser check confirmed the same Turtle mask on distinct cards, permanently visible room QR/link beneath the die, removal of the typed-result form, and leaving both an invite screen and active shared play to return to the preserved solo game. A fresh invite was successfully created after leaving. Existing local demo rooms were given an initial 24-hour deadline without altering their cards, prizes or rosters.
 
 Shared Undo: after an accepted non-winning roll, its submitter can choose Undo my last roll beneath the shared die. This restores everyone’s prior marks and turn eligibility. It is unavailable after another player submits or after bingo advances the round. Previously marked numbers remain marked if the undone roll repeated them. Undo applies to card taps and virtual die rolls.
 
 Undo validation: production build, all 96 solo/pattern/lifetime checks and all 32 emulator integration checks passed. The live browser check submitted 20 by card tap, displayed the submitter-only Undo control, then restored unmarked 20 squares and first-roll eligibility after Undo.
+
+The solo invitation form and completed invitation (QR, link, Invite and Leave) remain below the solo die until a shared round starts, including after refresh.

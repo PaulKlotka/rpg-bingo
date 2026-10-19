@@ -16,7 +16,7 @@ In shared play:
 6. Later joiners always wait until the next round, even if no numbers have yet been rolled on the current dealt card. No retroactive marks or prize are granted.
 7. Shared prizes have reversible used/unused controls and persist under the player's anonymous identity. Solo prizes remain separate and accessible below, with their original browser saving and controls. No prizes are imported from a client's untrusted solo save into the server's earned-prize ledger.
 
-There is no automatic expiry, session deletion, kick/leave control, fixed player order, or account recovery flow. If only one active player remains available, they must wait for another active player to submit; alternation is never silently waived. A session has a technical limit of 100 participants to bound Firestore transaction writes.
+Sessions expire after 24 hours without accepted activity, with hourly recursive cleanup in the cloud. Leave room returns to solo at any time and transfers the host role when needed. Shared rolls require at least two active players. There is no fixed player order or account recovery flow. A session has a technical limit of 100 participants to bound Firestore transaction writes.
 
 ## Run locally without a Firebase project or billing
 
@@ -78,37 +78,21 @@ The browser flow was also checked using separate origins for distinct anonymous 
 - The UI pauses submissions while reconnecting and checks card round before displaying it. Functions remain authoritative even if a client bypasses these UI controls.
 - Production callable requests require Firebase App Check. Emulators deliberately omit App Check; this is not an instruction to disable it in cloud deployment. Maximum function instances is 3, which limits scaling but is not a spending guarantee.
 
-## Manual cloud prerequisites — not performed
+## Cloud configuration and update procedure
 
-Cloud Functions deployment requires the **Blaze billing plan**. No billing authorization has been requested or applied, and no cloud service has been created or deployed. Before choosing to deploy:
+Production project: `rpg-bingo-paul` (RPG Games), with explicitly approved pay-as-you-go billing. The web app is registered, anonymous sign-in is enabled, and the default Firestore database is in `us-central1`. App Check uses a domain-restricted reCAPTCHA Enterprise score key. The callable enforces App Check; direct client writes remain denied.
 
-1. Create a Firebase project with display name **RPG Games** and an available unique project ID. Project ID availability is still unverified.
-2. Enable anonymous Authentication. Add the Hosting domain (and any intended custom domain) to the app's authorized domains as appropriate.
-3. Create the default Firestore database in a deliberately selected region and use the included locked-down rules, not open/test rules. Functions are configured for `us-central1`; choose a nearby database region and keep the client/function region consistent if you change it.
-4. Register a Firebase web app and obtain its public web configuration. Register App Check for that web app using reCAPTCHA Enterprise and the actual Hosting/custom domains. Obtain its public site key. No admin/service-account secret belongs in the browser.
-5. If proceeding with Cloud Functions, the project owner must choose and enable Blaze billing. Review Firebase usage/pricing and configure suitable billing alerts before public use. This remains a user-owned provisioning decision.
-6. Set production build environment values (for example, in ignored `.env.production.local`):
+`.firebaserc` selects this production project. The local demo emulator remains a separate project (`demo-rpg-games`). No local accounts, cards, or prizes were uploaded.
 
-   ```dotenv
-   VITE_USE_FIREBASE_EMULATORS=false
-   VITE_FIREBASE_CONFIG={"apiKey":"YOUR_WEB_API_KEY","authDomain":"YOUR_PROJECT.firebaseapp.com","projectId":"YOUR_ACTUAL_PROJECT_ID","appId":"YOUR_WEB_APP_ID"}
-   VITE_FIREBASE_APPCHECK_SITE_KEY=YOUR_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY
-   ```
+To publish an update:
 
-   Never publish a build configured for local emulators. `VITE_PUBLIC_ORIGIN` is used only in emulator mode; production invites derive from the actual Hosting origin.
+1. Install dependencies with `npm ci` and `npm --prefix functions ci`.
+2. Configure ignored `.env.production.local` with `VITE_USE_FIREBASE_EMULATORS=false`, `VITE_FIREBASE_CONFIG` containing the public web config from `npx firebase apps:sdkconfig WEB --project rpg-bingo-paul`, and `VITE_FIREBASE_APPCHECK_SITE_KEY` containing the existing App Check site key. These are public browser settings; never include administrator credentials. Production values override the emulator-only `.env.local`.
+3. Run `npm test`, start the demo emulators and run `npm run test:multiplayer`, then run `npm run build`.
+4. Sign in with the Firebase CLI and deploy explicitly: `npx firebase deploy --only firestore:rules,functions,hosting --project rpg-bingo-paul`.
+5. Verify Hosting, two distinct anonymous players, live shared rolls/undo, rejected unauthenticated calls, deployed rules, and the enabled hourly cleanup job. A GitHub push does not deploy automatically.
 
-7. Install dependencies, run all local checks above, sign in with the Firebase CLI, and verify your actual project ID. When explicitly ready to deploy manually:
-
-   ```sh
-   npx firebase login
-   npx firebase projects:list
-   npm run build
-   npx firebase deploy --only firestore:rules,functions,hosting --project YOUR_ACTUAL_PROJECT_ID
-   ```
-
-   The predeploy step compiles `functions/src/` into `functions/lib/`. Runtime dependencies are isolated in `functions/package.json`; canonical bingo/prize modules are pure shared TypeScript compiled for both environments. `firebase.json` deploys static `dist/`, Firestore rules, and the callable function. No `.firebaserc` or invented default project ID is included. Automatic GitHub deployment is deferred.
-
-8. Verify the returned HTTPS site on at least two physical devices: anonymous restore, QR joins, waiting until next card, both shared-roll inputs, alternating submitters, tied wins and prize use. Confirm App Check and security-rule enforcement in the real project. Live deployment and cloud checks are not completed by local emulator tests.
+Function scaling is limited to three callable instances and one cleanup instance, with no minimum instances configured. These limits do not cap Firestore, Authentication, reCAPTCHA, or total billing costs. No spending limit or billing alert has been configured.
 
 Production dependency audits reported zero known vulnerabilities in both the browser and function dependency sets. The development-only Firebase CLI dependency tree still has npm audit findings (including its file-watching dependency); it is not shipped in the site's assets or function runtime. Public deployment, production App Check, and cloud billing behavior have not been verified.
 
@@ -120,3 +104,11 @@ Each shared round stores one server-selected pattern for every active player. It
 Leaving a room removes the caller from its roster and retains their prize records until session cleanup. The host role transfers if needed; departed players cannot submit or receive new-round cards. Every shared session stores expiresAt, extended only by accepted game actions. Expired sessions reject commands immediately, while leave remains available. Deploying the scheduled cleanupExpiredSessions function enables hourly recursive room cleanup; Firebase may require Cloud Scheduler setup during the manual deployment. Browser solo state has its own inactivity deadline and is never uploaded by this feature.
 
 Undo my last roll is offered only to the last submitter, before another accepted roll or a round-ending bingo. The trusted transaction restores the exact earlier shared marks, roll count, latest result and last-submitter rule; it advances revision and refreshes inactivity expiry. An undone repeated number retains marks from earlier rolls. Undo receipts make retries idempotent, stale tokens and concurrent rolls are rejected, and winning rolls cannot revoke awards or roll back a new round.
+
+## Production access configuration
+
+The organization blocks IAM grants to `allUsers`. For the game callable only, the explicitly approved Cloud Run setting `invokerIamDisabled=true` lets browser HTTP requests reach mandatory Firebase Authentication and App Check. Cleanup retains its IAM check and allows only `bingo-runtime@rpg-bingo-paul.iam.gserviceaccount.com`, matching the scheduler identity. Verify these settings after future function updates. The runtime has `roles/datastore.user`; the build identity has the approved `roles/cloudbuild.builds.builder` role in this project. See Google's [public Cloud Run access guidance](https://docs.cloud.google.com/run/docs/authenticating/public).
+
+No image cleanup policy or billing alert is configured. The CLI may report a missing Artifact Registry cleanup policy after successful function updates; read back actual function and scheduler states. The hourly scheduler is enabled. An immediate manual cleanup test was not run.
+
+Solo Invite opens its display-name form directly beneath the invite control in the die sidebar. The panel moves to the shared area once a room exists.

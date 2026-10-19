@@ -147,3 +147,12 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Local multiplayer emulator state, dependencies, and compiled server code
+functions/lib/
+.emulator-state/
+.firebase-config/
+.emulator-cache/
+
+# Local emulator export staging (may contain anonymous session data)
+firebase-export-*/

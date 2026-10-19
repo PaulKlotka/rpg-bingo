@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function member(roomId) {
+      return request.auth != null && exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid))
+        && get(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid)).data.get('left', false) == false;
+    }
+    match /rooms/{roomId} {
+      allow get: if member(roomId);
+      allow list, write: if false;
+      match /players/{uid} {
+        allow get: if request.auth != null && request.auth.uid == uid;
+        allow list, write: if false;
+        match /awards/{awardId} {
+          allow read: if request.auth != null && request.auth.uid == uid && exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(uid));
+          allow write: if false;
+        }
+      }
+      match /rounds/{roundId} {
+        allow read: if member(roomId);
+        allow write: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

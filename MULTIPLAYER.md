@@ -1,0 +1,122 @@
+# Shared bingo: local setup and deployment
+
+## Current scope
+
+The default page stays single-player. **Invite a player · Show QR / session link** opens an invitation; a display name creates an anonymous session. The QR encodes a direct URL to that exact session. No room code or signup is required.
+
+Inviting preserves the host's current local card, marks, prize, win lock, and solo inventory. Every invited player waits without a card. The host continues unrestricted single-player play for the current card. Once someone has joined, the host's next explicit **New Card** starts the first shared round and deals fresh cards and one new shared prize to everyone. Inviting alone does not reset a card or force the host into a lobby.
+
+In shared play:
+
+1. Each active player has a separately randomized 5×5 card, free center, every number from 1–20, and four distinct numbers appearing twice.
+2. Any eligible active player can tap a numbered card square to submit a physical result, or roll the virtual die for the group. Tapping a square submits that number as a shared roll; it does not toggle marks off. Shared rolls only add marks. The free center cannot be submitted.
+3. The same player cannot submit twice consecutively, across either input method and across round boundaries. This is not a fixed order: any different active player may submit next. Waiting players cannot submit. The server enforces this rule; rejected requests do not mutate the round or prizes.
+4. A bingo ends the round for everyone. All players whose cards complete the selected pattern on that same roll receive one independent instance of the shared prize. The server atomically awards prizes, deals fresh cards to everyone, clears marks, admits waiting joiners, and selects the next shared prize.
+5. A persistent latest-round banner identifies the winners, winning number and prize, so the automatic reset does not hide the result. The banner remains until another round completes.
+6. Later joiners always wait until the next round, even if no numbers have yet been rolled on the current dealt card. No retroactive marks or prize are granted.
+7. Shared prizes have reversible used/unused controls and persist under the player's anonymous identity. Solo prizes remain separate and accessible below, with their original browser saving and controls. No prizes are imported from a client's untrusted solo save into the server's earned-prize ledger.
+
+There is no automatic expiry, session deletion, kick/leave control, fixed player order, or account recovery flow. If only one active player remains available, they must wait for another active player to submit; alternation is never silently waived. A session has a technical limit of 100 participants to bound Firestore transaction writes.
+
+## Run locally without a Firebase project or billing
+
+Prerequisites: Node.js 22.12+ (the function deployment targets Node 22), npm, and Java 21+. On this computer an existing Android Studio Java 21 runtime is detected automatically by the helper; otherwise put Java on PATH. Local tests here used Node 24.21 and Java 21.0.9, so they are not a cloud Node 22 runtime test.
+
+1. Install both dependency sets:
+
+   ```sh
+   npm ci
+   npm --prefix functions ci
+   ```
+
+2. Copy `.env.example` to `.env.local` and keep `VITE_USE_FIREBASE_EMULATORS=true`. For QR use on phones, set `VITE_PUBLIC_ORIGIN` to this computer's reachable Wi-Fi address and Vite port, for example `http://192.168.1.10:5173`. The current local file uses this computer's verified preview address, `http://192.168.86.24:5173`. That address can change.
+3. In one terminal, run:
+
+   ```sh
+   npm run emulators
+   ```
+
+   This compiles the server and starts Authentication (9099), Firestore (8080), and Functions (5001) under **demo-rpg-games**, an emulator-only namespace. It does not create a Firebase project, use cloud credentials, log into Firebase, or enable billing. Emulator tooling configuration/cache stays in ignored workspace folders. The emulator UI is local-only at http://127.0.0.1:4000.
+
+4. In another terminal:
+
+   ```sh
+   npm run dev -- --port 5173 --strictPort
+   ```
+
+5. Open http://localhost:5173 on this computer. Choose **Invite a player**, enter a display name, and display the QR/link. Another browser/device joins through that link and waits. The host chooses New Card to begin shared play. Each browser's anonymous identity is separate; opening another tab on the same origin normally reuses the same player, so it is not a way to create a second player.
+
+**Phone trap:** a phone's `localhost` means the phone, not this computer. Share the LAN link, keep both devices on the same trusted Wi-Fi, and ensure the local network permits ports 5173, 9099, 8080 and 5001. Emulators listen on this computer's LAN interfaces for local tests; do not expose them to the public internet or forward these ports through a router. No firewall settings have been changed by this implementation. Actual access from a physical phone remains to be checked on that phone.
+
+The anonymous identity is saved in browser storage. Keep the same origin and session URL when reloading. Switching from `localhost` to a LAN address creates a separate browser storage origin/identity. Clearing browser data loses the anonymous identity and its access to that player's old card/prizes. There is no signup recovery. The emulator helper imports prior `.emulator-state` data when an export exists and requests export on clean shutdown; abrupt process termination can lose emulator-only server state.
+
+## Validation
+
+With the emulator processes running:
+
+```sh
+npm test
+npm run test:multiplayer
+npm run build
+```
+
+`npm test` covers the 96 solo, pattern and lifetime tests. `npm run test:multiplayer` runs 32 tests using separate authenticated Firebase client apps and actual Auth/Firestore/callable emulators. The suite verifies invite/start gating, active vs waiting players, live subscriptions, repeated numbers, physical/virtual submissions, no fixed player order (two of five players repeatedly alternating), turn enforcement, concurrent same-player and different-player requests, idempotent retries, tied wins, automatic fresh cards, waiting-player admission, prize use ownership, reconnect, invalid input and security rules.
+
+Tie and race tests use explicitly seeded synthetic cards via test-only emulator Admin SDK access. The final browser tied-win check also used seeded cards in an isolated Preview Host / Preview Guest room, after checking the originally randomized cards and regular shared rolls. Production exposes no fixture or card-edit endpoint. Tests operate only against the demo project and fail if emulators are unavailable. They do not prove deployed cross-device service. Client-rule permission-denied messages in these tests are expected checks.
+
+The browser flow was also checked using separate origins for distinct anonymous players, including the reachable LAN invite URL. Unit tests are not a substitute for that flow or for future cloud verification.
+
+## Architecture and security
+
+- Anonymous Authentication supplies stable server-verified UIDs. A caller cannot choose another player's UID in request data.
+- `rooms/{id}` contains shared round/revision/marks/prize, membership, last accepted submitter, and latest result. Each player can read their own card and own `awards` subcollection. Members can read the room and completed-round summaries, not other players' cards or prizes. Session IDs use 128 random bits.
+- Browser writes to rooms, cards, membership, awards and commands are denied by `firestore.rules`. All changes pass through the authenticated `gameCommand` callable.
+- Each roll transaction checks membership, active eligibility, last submitter, expected round and revision. It marks, detects all winners, creates deterministic per-player/per-round award documents, rotates cards and prize, records the result, and stores the request receipt in one commit.
+- Membership changes update the same room document. They therefore conflict with a simultaneous roll transaction rather than slipping through its eligibility snapshot.
+- Clients include an unpredictable request ID; retrying an accepted request returns its stored receipt without applying it again. Reusing that ID with different content is rejected. Requests with stale round/revision are rejected. Virtual results and all dealt cards/prizes are generated by the trusted server.
+- After a win, the last submitter remains unchanged even though the round resets. Rejected actions do not advance the turn. Used/unused updates are absolute owner-scoped values, so network retries do not accidentally toggle twice.
+- The UI pauses submissions while reconnecting and checks card round before displaying it. Functions remain authoritative even if a client bypasses these UI controls.
+- Production callable requests require Firebase App Check. Emulators deliberately omit App Check; this is not an instruction to disable it in cloud deployment. Maximum function instances is 3, which limits scaling but is not a spending guarantee.
+
+## Manual cloud prerequisites — not performed
+
+Cloud Functions deployment requires the **Blaze billing plan**. No billing authorization has been requested or applied, and no cloud service has been created or deployed. Before choosing to deploy:
+
+1. Create a Firebase project with display name **RPG Games** and an available unique project ID. Project ID availability is still unverified.
+2. Enable anonymous Authentication. Add the Hosting domain (and any intended custom domain) to the app's authorized domains as appropriate.
+3. Create the default Firestore database in a deliberately selected region and use the included locked-down rules, not open/test rules. Functions are configured for `us-central1`; choose a nearby database region and keep the client/function region consistent if you change it.
+4. Register a Firebase web app and obtain its public web configuration. Register App Check for that web app using reCAPTCHA Enterprise and the actual Hosting/custom domains. Obtain its public site key. No admin/service-account secret belongs in the browser.
+5. If proceeding with Cloud Functions, the project owner must choose and enable Blaze billing. Review Firebase usage/pricing and configure suitable billing alerts before public use. This remains a user-owned provisioning decision.
+6. Set production build environment values (for example, in ignored `.env.production.local`):
+
+   ```dotenv
+   VITE_USE_FIREBASE_EMULATORS=false
+   VITE_FIREBASE_CONFIG={"apiKey":"YOUR_WEB_API_KEY","authDomain":"YOUR_PROJECT.firebaseapp.com","projectId":"YOUR_ACTUAL_PROJECT_ID","appId":"YOUR_WEB_APP_ID"}
+   VITE_FIREBASE_APPCHECK_SITE_KEY=YOUR_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY
+   ```
+
+   Never publish a build configured for local emulators. `VITE_PUBLIC_ORIGIN` is used only in emulator mode; production invites derive from the actual Hosting origin.
+
+7. Install dependencies, run all local checks above, sign in with the Firebase CLI, and verify your actual project ID. When explicitly ready to deploy manually:
+
+   ```sh
+   npx firebase login
+   npx firebase projects:list
+   npm run build
+   npx firebase deploy --only firestore:rules,functions,hosting --project YOUR_ACTUAL_PROJECT_ID
+   ```
+
+   The predeploy step compiles `functions/src/` into `functions/lib/`. Runtime dependencies are isolated in `functions/package.json`; canonical bingo/prize modules are pure shared TypeScript compiled for both environments. `firebase.json` deploys static `dist/`, Firestore rules, and the callable function. No `.firebaserc` or invented default project ID is included. Automatic GitHub deployment is deferred.
+
+8. Verify the returned HTTPS site on at least two physical devices: anonymous restore, QR joins, waiting until next card, both shared-roll inputs, alternating submitters, tied wins and prize use. Confirm App Check and security-rule enforcement in the real project. Live deployment and cloud checks are not completed by local emulator tests.
+
+Production dependency audits reported zero known vulnerabilities in both the browser and function dependency sets. The development-only Firebase CLI dependency tree still has npm audit findings (including its file-watching dependency); it is not shipped in the site's assets or function runtime. Public deployment, production App Check, and cloud billing behavior have not been verified.
+
+References: [callable functions](https://firebase.google.com/docs/functions/callable), [transactions](https://firebase.google.com/docs/firestore/manage-data/transactions), [anonymous auth](https://firebase.google.com/docs/auth/web/anonymous-auth), [local emulators](https://firebase.google.com/docs/emulator-suite/install_and_configure), [App Check with reCAPTCHA Enterprise](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider), [Functions deployment and Blaze prerequisite](https://firebase.google.com/docs/functions/get-started).
+
+
+Each shared round stores one server-selected pattern for every active player. It remains fixed until bingo, when the atomic next-round deal also selects the next pattern. The completed-round summary records the winning pattern. Rooms created before patterns were introduced keep Single Line until the next round. Required target squares are outlined on every player’s own card; Single Line and Two Lines show examples and accept any completed line(s).
+
+Leaving a room removes the caller from its roster and retains their prize records until session cleanup. The host role transfers if needed; departed players cannot submit or receive new-round cards. Every shared session stores expiresAt, extended only by accepted game actions. Expired sessions reject commands immediately, while leave remains available. Deploying the scheduled cleanupExpiredSessions function enables hourly recursive room cleanup; Firebase may require Cloud Scheduler setup during the manual deployment. Browser solo state has its own inactivity deadline and is never uploaded by this feature.
+
+Undo my last roll is offered only to the last submitter, before another accepted roll or a round-ending bingo. The trusted transaction restores the exact earlier shared marks, roll count, latest result and last-submitter rule; it advances revision and refreshes inactivity expiry. An undone repeated number retains marks from earlier rolls. Undo receipts make retries idempotent, stale tokens and concurrent rolls are rejected, and winning rolls cannot revoke awards or roll back a new round.

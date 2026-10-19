@@ -53,7 +53,18 @@ async function shared() {
 }
 async function send(who: Client, roomId: string, number: number, extra: Record<string, unknown> = {}) {
   const room = await roomData(roomId);
-  return who.call({ action: 'roll', roomId, round: room.round, revision: room.revision, kind: 'physical', number, requestId: id(), ...extra }) as Promise<RollReceipt>;
+  const { holdBingo, ...payload } = extra;
+  const receipt = await who.call({ action: 'roll', roomId, round: room.round, revision: room.revision, kind: 'physical', number, requestId: id(), ...payload }) as RollReceipt;
+  if (!holdBingo) await settleBingo(roomId);
+  return receipt;
+}
+// Fast-forward only emulator fixtures for existing post-win assertions. A separate
+// test below exercises the real fifteen-second deadline without changing it.
+async function settleBingo(roomId: string) {
+  const room = await roomData(roomId);
+  if (!room.pendingBingo) return;
+  await admin.doc(`rooms/${roomId}`).update({ 'pendingBingo.confirmAt': Date.now() - 1 });
+  await a.call({ action: 'confirm', roomId, round: room.round, pendingId: room.pendingBingo.requestId });
 }
 const rejectCode = async (promise: Promise<unknown>, code: string) => assert.rejects(promise, (error: any) => error.code === `functions/${code}` || error.code === code);
 async function undo(who: Client, roomId: string, extra: Record<string, unknown> = {}) {
@@ -152,6 +163,58 @@ test('a winning roll cannot be undone or revoke prizes after advancing the round
   assert.equal((await awards(roomId, b)).length, 1);
 });
 
+test('bingo review freezes every card, defers awards, blocks early confirmation and allows winning-roll undo', async () => {
+  const roomId = await shared();
+  await seedCards(roomId, Array.from({ length: 25 }, (_, i) => i === 12 ? null : 1));
+  const before = await roomData(roomId);
+  const originalCard = (await playerData(roomId, a)).card;
+  await send(a, roomId, 1, { holdBingo: true });
+  const pending = await roomData(roomId);
+  assert.equal(pending.round, 1); assert.deepEqual(pending.marks, [1]);
+  assert.equal(pending.prize, before.prize); assert.equal(pending.pattern, before.pattern);
+  assert.deepEqual((await playerData(roomId, a)).card, originalCard);
+  assert.equal((await awards(roomId, a)).length, 0); assert.equal((await awards(roomId, b)).length, 0);
+  assert.equal(pending.pendingBingo!.result.winners.length, 2);
+  const confirmation = { action: 'confirm', roomId, round: 1, pendingId: pending.pendingBingo!.requestId };
+  await rejectCode(b.call(confirmation), 'failed-precondition');
+  await rejectCode(outsider.call(confirmation), 'permission-denied');
+  await rejectCode(b.call({ ...confirmation, pendingId: id() }), 'failed-precondition');
+  await rejectCode(send(b, roomId, 2), 'failed-precondition');
+  await rejectCode(undo(b, roomId), 'failed-precondition');
+  await undo(a, roomId);
+  const restored = await roomData(roomId);
+  assert.equal(restored.pendingBingo, null); assert.equal(restored.round, 1);
+  assert.deepEqual(restored.marks, before.marks); assert.equal(restored.lastSubmitter, before.lastSubmitter);
+  assert.deepEqual((await playerData(roomId, a)).card, originalCard);
+  await rejectCode(a.call(confirmation), 'failed-precondition');
+  assert.equal((await awards(roomId, a)).length, 0);
+});
+
+test('real fifteen-second review rejects late undo and confirms tied awards exactly once under concurrent retries', async () => {
+  const roomId = await shared();
+  await seedCards(roomId, Array.from({ length: 25 }, (_, i) => i === 12 ? null : 1));
+  const started = Date.now();
+  await send(a, roomId, 1, { holdBingo: true });
+  const pending = await roomData(roomId);
+  assert.ok(pending.pendingBingo!.confirmAt >= started + 15000);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.equal((await playerData(roomId, c)).card, null);
+  await new Promise(resolve => setTimeout(resolve, Math.max(0, pending.pendingBingo!.confirmAt - Date.now()) + 30));
+  await rejectCode(undo(a, roomId), 'failed-precondition');
+  const payload = { action: 'confirm', roomId, round: 1, pendingId: pending.pendingBingo!.requestId };
+  await Promise.all([a.call(payload), b.call(payload), c.call(payload), a.call(payload)]);
+  const next = await roomData(roomId);
+  assert.equal(next.round, 2); assert.equal(next.pendingBingo, null); assert.equal(next.undo, null);
+  assert.equal(next.revision, pending.revision + 2); // One join and exactly one confirmation.
+  assert.deepEqual(next.marks, []);
+  for (const who of [a,b]) assert.equal((await awards(roomId, who)).length, 1);
+  assert.equal((await awards(roomId, c)).length, 0);
+  assert.equal((await playerData(roomId, c)).eligibleRound, 2);
+  const final = await roomData(roomId);
+  await a.call(payload); assert.deepEqual(await roomData(roomId), final);
+  await rejectCode(undo(a, roomId), 'failed-precondition');
+});
+
 test('expired sessions and departed players cannot undo', async () => {
   const roomId = await shared(); await seedCards(roomId);
   await send(a, roomId, 1);
@@ -220,8 +283,8 @@ test('active departure preserves progress, pauses lone players, and retains earn
   await rejectCode(send(b, roomId, 2), 'failed-precondition');
   await a.call({ action: 'join', roomId, name: 'Alpha' });
   assert.equal((await playerData(roomId, a)).left, false);
-  assert.equal((await playerData(roomId, a)).eligibleRound, after.round + 1);
-  assert.equal((await playerData(roomId, a)).card, null);
+  assert.equal((await playerData(roomId, a)).eligibleRound, after.round);
+  assert.equal((await playerData(roomId, a)).card!.length, 25);
   assert.deepEqual(await awards(roomId, a), earned);
 });
 
@@ -369,6 +432,42 @@ test('mid-round joiners have no card, receive no retroactive marks, and cannot s
   assert.deepEqual(await roomData(roomId), before);
 });
 
+test('a player joining an untouched round receives a fresh active card and shares its existing pattern', async () => {
+  const roomId = await shared();
+  const before = await roomData(roomId);
+  const hostCard = (await playerData(roomId, a)).card;
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  const joined = await playerData(roomId, c);
+  assert.equal(joined.eligibleRound, before.round); assert.equal(joined.card!.length, 25);
+  const after = await roomData(roomId);
+  assert.equal(after.pattern, before.pattern); assert.equal(after.prize, before.prize);
+  assert.deepEqual((await playerData(roomId, a)).card, hostCard);
+  assert.deepEqual(after.marks, []);
+  await send(c, roomId, 20, { holdBingo: true });
+  assert.equal((await roomData(roomId)).lastSubmitter, c.uid);
+});
+
+test('join racing the first roll either joins untouched play or waits, without receiving a partially played card', async () => {
+  const roomId = await shared(); await seedCards(roomId);
+  const room = await roomData(roomId);
+  const results = await Promise.allSettled([
+    c.call({ action: 'join', roomId, name: 'Gamma' }),
+    a.call({ action: 'roll', roomId, round: room.round, revision: room.revision, kind: 'physical', number: 1, requestId: id() }),
+  ]);
+  assert.equal(results[0].status, 'fulfilled');
+  const joined = await playerData(roomId, c); const after = await roomData(roomId);
+  if (joined.eligibleRound === 1) assert.equal(joined.card!.length, 25);
+  else { assert.equal(joined.eligibleRound, 2); assert.equal(joined.card, null); assert.deepEqual(after.marks, [1]); }
+});
+
+test('after the first roll is undone, a new player can join the now untouched round', async () => {
+  const roomId = await shared(); await seedCards(roomId);
+  await send(a, roomId, 1); await undo(a, roomId);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.equal((await playerData(roomId, c)).eligibleRound, 1);
+  assert.equal((await playerData(roomId, c)).card!.length, 25);
+});
+
 test('concurrent requests by the same player cannot bypass turn enforcement', async () => {
   const roomId = await shared(); await seedCards(roomId);
   const room = await roomData(roomId);
@@ -431,6 +530,7 @@ test('one atomic tied win awards all winners once, admits waiters and resets eve
   const old = await roomData(roomId);
   const payload = { action: 'roll', roomId, round: old.round, revision: old.revision, kind: 'physical', number: 5, requestId: id() };
   const receipt = await a.call(payload);
+  await settleBingo(roomId);
   const next = await roomData(roomId);
   assert.equal(next.round, 2); assert.equal(next.rolls, 0); assert.deepEqual(next.marks, []);
   assert.equal(next.lastSubmitter, a.uid);

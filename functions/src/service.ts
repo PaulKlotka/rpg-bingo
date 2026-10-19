@@ -52,8 +52,9 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
         if (playerSnapshot.exists && !playerSnapshot.get('left')) return { roomId: data.roomId };
         // Bound transaction size; even a tied win stays below Firestore write limits.
         if (room.members.length >= 100) throw new HttpsError('resource-exhausted', 'This session is full (100 players).');
-        const eligibleRound = room.round + 1;
-        tx.set(playerRef, { name, eligibleRound, card: null, left: false } satisfies Player);
+        const joinCurrent = room.phase === 'shared' && room.marks.length === 0 && !room.pendingBingo;
+        const eligibleRound = joinCurrent ? room.round : room.round + 1;
+        tx.set(playerRef, { name, eligibleRound, card: joinCurrent ? card() : null, left: false } satisfies Player);
         tx.update(roomRef, { members: [...room.members, { uid, name, eligibleRound }], revision: room.revision + 1, expiresAt: nextExpiry() });
       }
       return { roomId: data.roomId };
@@ -125,6 +126,7 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
       if (!snapshot.exists) throw new HttpsError('not-found', 'Session not found.');
       const room = snapshot.data() as Room;
       requireLive(room);
+      if (room.pendingBingo && Date.now() >= room.pendingBingo.confirmAt) throw new HttpsError('failed-precondition', 'The bingo review period has ended.');
       const actor = room.members.find(member => member.uid === uid);
       if (!actor) throw new HttpsError('permission-denied', 'Join this session before undoing a roll.');
       const undo = room.undo;
@@ -133,11 +135,40 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
       const receipt = { undone: true, round: room.round, revision: room.revision + 1 };
       tx.update(roomRef, {
         marks: undo.marks, rolls: undo.rolls, lastSubmitter: undo.lastSubmitter,
-        lastAction: undo.lastAction, undo: null, lastUndo: { name: actor.name, number: undo.number, round: room.round },
+        lastAction: undo.lastAction, undo: null, pendingBingo: null, lastUndo: { name: actor.name, number: undo.number, round: room.round },
         revision: receipt.revision, expiresAt: nextExpiry(),
       });
       tx.create(receiptRef, { fingerprint, receipt });
       return receipt;
+    });
+  }
+
+  if (data.action === 'confirm') {
+    if (!integer(data.round) || data.round < 1 || !identifier(data.pendingId)) throw new HttpsError('invalid-argument', 'Invalid bingo confirmation.');
+    const confirmingRound = data.round;
+    return db.runTransaction(async tx => {
+      const snapshot = await tx.get(roomRef);
+      if (!snapshot.exists) throw new HttpsError('not-found', 'Session not found.');
+      const room = snapshot.data() as Room;
+      requireLive(room);
+      if (!room.members.some(member => member.uid === uid)) throw new HttpsError('permission-denied', 'Join this session before confirming bingo.');
+      if (room.round > confirmingRound) return { confirmed: true, round: room.round };
+      const pending = room.pendingBingo;
+      if (!pending || room.round !== data.round || pending.requestId !== data.pendingId) throw new HttpsError('failed-precondition', 'That bingo is no longer pending.');
+      if (Date.now() < pending.confirmAt) throw new HttpsError('failed-precondition', 'Allow fifteen seconds to review the winning roll.');
+      const players = await tx.get(roomRef.collection('players'));
+      const nextRound = room.round + 1;
+      for (const winner of pending.result.winners) tx.create(roomRef.collection('players').doc(winner.uid).collection('awards').doc(String(room.round)), {
+        id: String(room.round), round: room.round, prize: pending.result.prize, used: false,
+      });
+      for (const player of players.docs.filter(p => !p.get('left'))) tx.update(player.ref, { card: card(), eligibleRound: nextRound });
+      tx.create(roomRef.collection('rounds').doc(String(room.round)), pending.result);
+      tx.update(roomRef, {
+        round: nextRound, revision: room.revision + 1, marks: [], rolls: 0, prize: prize(), pattern: selectPattern(random),
+        expiresAt: nextExpiry(), lastResult: pending.result, pendingBingo: null, undo: null, lastUndo: null,
+        members: room.members.map(member => ({ ...member, eligibleRound: nextRound })),
+      });
+      return { confirmed: true, round: nextRound };
     });
   }
 
@@ -160,6 +191,7 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
     const actor = room.members.find(member => member.uid === uid);
     if (!actor) throw new HttpsError('permission-denied', 'Join this session before submitting a roll.');
     if (actor.eligibleRound > room.round) throw new HttpsError('failed-precondition', 'You are waiting for the next round.');
+    if (room.pendingBingo) throw new HttpsError('failed-precondition', 'Cards are locked while bingo is reviewed.');
     if (room.members.filter(member => member.eligibleRound <= room.round).length < 2) throw new HttpsError('failed-precondition', 'Shared play needs two active players. You can leave the room to play solo or create a new invite.');
     if (room.lastSubmitter === uid) throw new HttpsError('failed-precondition', 'A different active player must submit the next roll.');
     if (room.round !== data.round || room.revision !== data.revision) throw new HttpsError('aborted', 'The game changed. Check the latest result before submitting again.');
@@ -172,28 +204,12 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
     }).map(player => ({ uid: player.id, name: player.get('name') as string }));
     const revision = room.revision + 1;
     const lastAction = { number: value, name: actor.name, round: room.round };
-    let resultingRound = room.round;
-    if (winners.length) {
-      resultingRound++;
-      const result: RoundResult = { round: room.round, number: value, prize: room.prize, pattern: room.pattern ?? 'single-line', winners };
-      for (const winner of winners) {
-        tx.create(roomRef.collection('players').doc(winner.uid).collection('awards').doc(String(room.round)), {
-          id: String(room.round), round: room.round, prize: room.prize, used: false,
-        });
-      }
-      for (const player of players.docs.filter(p => !p.get('left'))) tx.update(player.ref, { card: card(), eligibleRound: resultingRound });
-      tx.create(roomRef.collection('rounds').doc(String(room.round)), result);
-      tx.update(roomRef, {
-        round: resultingRound, revision, marks: [], rolls: 0, prize: prize(), pattern: selectPattern(random), expiresAt: nextExpiry(),
-        lastSubmitter: uid, lastAction, lastResult: result, undo: null, lastUndo: null,
-        members: room.members.map(member => ({ ...member, eligibleRound: resultingRound })),
-      });
-    } else {
-      tx.update(roomRef, {
+    const resultingRound = room.round;
+    tx.update(roomRef, {
         revision, marks, rolls: room.rolls + 1, lastSubmitter: uid, lastAction, expiresAt: nextExpiry(), lastUndo: null,
         undo: { uid, requestId: data.requestId, number: value, round: room.round, marks: room.marks, rolls: room.rolls, lastSubmitter: room.lastSubmitter, lastAction: room.lastAction },
+        pendingBingo: winners.length ? { result: { round: room.round, number: value, prize: room.prize, pattern: room.pattern ?? 'single-line', winners } satisfies RoundResult, confirmAt: Date.now() + 15000, requestId: data.requestId } : null,
       });
-    }
     const receipt: RollReceipt = { number: value, playedRound: room.round, resultingRound, revision };
     tx.create(commandRef, { fingerprint, receipt });
     return receipt;

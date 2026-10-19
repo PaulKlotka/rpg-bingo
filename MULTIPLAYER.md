@@ -11,9 +11,9 @@ In shared play:
 1. Each active player has a separately randomized 5×5 card, free center, every number from 1–20, and four distinct numbers appearing twice.
 2. Any eligible active player can tap a numbered card square to submit a physical result, or roll the virtual die for the group. Tapping a square submits that number as a shared roll; it does not toggle marks off. Shared rolls only add marks. The free center cannot be submitted.
 3. The same player cannot submit twice consecutively, across either input method and across round boundaries. This is not a fixed order: any different active player may submit next. Waiting players cannot submit. The server enforces this rule; rejected requests do not mutate the round or prizes.
-4. A bingo ends the round for everyone. All players whose cards complete the selected pattern on that same roll receive one independent instance of the shared prize. The server atomically awards prizes, deals fresh cards to everyone, clears marks, admits waiting joiners, and selects the next shared prize.
+4. A bingo locks every card for a fifteen-second review. The winning submitter can undo during that window; no prizes or fresh cards are issued yet. At the server deadline, connected clients automatically request confirmation. One transaction awards tied winners, deals fresh cards, clears marks, admits waiters, and selects the next pattern/prize. If everyone disconnects, the first member reconnecting completes overdue confirmation.
 5. A persistent latest-round banner identifies the winners, winning number and prize, so the automatic reset does not hide the result. The banner remains until another round completes.
-6. Later joiners always wait until the next round, even if no numbers have yet been rolled on the current dealt card. No retroactive marks or prize are granted.
+6. Later joiners receive a fresh active card immediately if the shared round has no marked numbers and no pending bingo. Otherwise they wait until the next round. The initial invite phase still waits for the host to start shared play. Joining races the first roll in one server transaction, preventing a partially played deal.
 7. Shared prizes have reversible used/unused controls and persist under the player's anonymous identity. Solo prizes remain separate and accessible below, with their original browser saving and controls. No prizes are imported from a client's untrusted solo save into the server's earned-prize ledger.
 
 Sessions expire after 24 hours without accepted activity, with hourly recursive cleanup in the cloud. Leave room returns to solo at any time and transfers the host role when needed. Shared rolls require at least two active players. There is no fixed player order or account recovery flow. A session has a technical limit of 100 participants to bound Firestore transaction writes.
@@ -60,7 +60,7 @@ npm run test:multiplayer
 npm run build
 ```
 
-`npm test` covers the 96 solo, pattern and lifetime tests. `npm run test:multiplayer` runs 32 tests using separate authenticated Firebase client apps and actual Auth/Firestore/callable emulators. The suite verifies invite/start gating, active vs waiting players, live subscriptions, repeated numbers, physical/virtual submissions, no fixed player order (two of five players repeatedly alternating), turn enforcement, concurrent same-player and different-player requests, idempotent retries, tied wins, automatic fresh cards, waiting-player admission, prize use ownership, reconnect, invalid input and security rules.
+`npm test` covers the 96 solo, pattern and lifetime tests. `npm run test:multiplayer` runs 37 tests using separate authenticated Firebase client apps and actual Auth/Firestore/callable emulators. The suite verifies invite/start gating, active vs waiting players, live subscriptions, repeated numbers, physical/virtual submissions, no fixed player order (two of five players repeatedly alternating), turn enforcement, concurrent same-player and different-player requests, idempotent retries, tied wins, automatic fresh cards, waiting-player admission, prize use ownership, reconnect, invalid input and security rules.
 
 Tie and race tests use explicitly seeded synthetic cards via test-only emulator Admin SDK access. The final browser tied-win check also used seeded cards in an isolated Preview Host / Preview Guest room, after checking the originally randomized cards and regular shared rolls. Production exposes no fixture or card-edit endpoint. Tests operate only against the demo project and fail if emulators are unavailable. They do not prove deployed cross-device service. Client-rule permission-denied messages in these tests are expected checks.
 
@@ -103,7 +103,7 @@ Each shared round stores one server-selected pattern for every active player. It
 
 Leaving a room removes the caller from its roster and retains their prize records until session cleanup. The host role transfers if needed; departed players cannot submit or receive new-round cards. Every shared session stores expiresAt, extended only by accepted game actions. Expired sessions reject commands immediately, while leave remains available. Deploying the scheduled cleanupExpiredSessions function enables hourly recursive room cleanup; Firebase may require Cloud Scheduler setup during the manual deployment. Browser solo state has its own inactivity deadline and is never uploaded by this feature.
 
-Undo my last roll is offered only to the last submitter, before another accepted roll or a round-ending bingo. The trusted transaction restores the exact earlier shared marks, roll count, latest result and last-submitter rule; it advances revision and refreshes inactivity expiry. An undone repeated number retains marks from earlier rolls. Undo receipts make retries idempotent, stale tokens and concurrent rolls are rejected, and winning rolls cannot revoke awards or roll back a new round.
+Undo my last roll is offered only to the last submitter, before another accepted roll or bingo confirmation. The trusted transaction restores the exact earlier shared marks, roll count, latest result and last-submitter rule; it advances revision and refreshes inactivity expiry. An undone repeated number retains marks from earlier rolls. Undo receipts make retries idempotent, stale tokens and concurrent rolls are rejected, and winning rolls cannot revoke awards or roll back a new round.
 
 ## Production access configuration
 
@@ -111,4 +111,7 @@ The organization blocks IAM grants to `allUsers`. For the game callable only, th
 
 No image cleanup policy or billing alert is configured. The CLI may report a missing Artifact Registry cleanup policy after successful function updates; read back actual function and scheduler states. The hourly scheduler is enabled. An immediate manual cleanup test was not run.
 
-Solo Invite opens its display-name form directly beneath the invite control in the die sidebar. The panel moves to the shared area once a room exists.
+Solo Invite and its display-name form, completed QR/link and Leave control stay beneath the solo die while the host is inviting, including after refresh. The panel moves into the shared area when shared play starts.
+
+
+Bingo review and untouched-round entry: all 37 multiplayer emulator checks passed, including the real fifteen-second deadline, early-confirm/late-undo rejection, concurrent confirmation retries, winning-roll undo, immediate deals and first-roll/join races. A review holds the original pattern, prize, cards and marks. No new roll is accepted while pending. Undo restores the pre-roll state and cancels the pending win; after confirmation, prizes and the new round are final. Confirmation is automatic from connected clients; if all are offline, it completes on reconnect.

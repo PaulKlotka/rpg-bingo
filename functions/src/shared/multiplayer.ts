@@ -7,6 +7,7 @@ export interface RoundResult {
   winners: { uid: string; name: string }[];
 }
 export interface Room {
+  pendingBingo?: { result: RoundResult; confirmAt: number; requestId: string } | null;
   undo?: {
     uid: string; requestId: string; round: number; number: number;
     marks: number[]; rolls: number; lastSubmitter: string | null;

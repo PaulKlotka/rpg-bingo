@@ -35,7 +35,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <section id="prize" class="prize-panel" aria-labelledby="prize-name" role="status" aria-live="polite" aria-atomic="true">
             <p id="prize-state" class="eyebrow">THIS CARD’S PRIZE</p><h3 id="prize-name"></h3><p id="prize-benefit"></p><p id="prize-help" class="prize-help"></p>
           </section>
-          <section class="pattern-panel" aria-label="Winning pattern"><p class="eyebrow">THIS CARD’S WINNING PATTERN</p><h3 id="pattern-name"></h3><p id="pattern-help"></p><p class="pattern-legend">◇ Outline = target · Green fill = marked</p></section>
+          <section class="pattern-panel" aria-label="Winning pattern"><p class="eyebrow">THIS CARD’S WINNING PATTERN</p><h3><span id="pattern-name" class="pattern-desktop-title"></span><button id="solo-pattern-toggle" class="pattern-toggle" type="button" aria-expanded="false" aria-controls="solo-pattern-details"></button></h3><div id="solo-pattern-details" class="pattern-details"><p id="pattern-help"></p><p class="pattern-legend">◇ Outline = target · Green fill = marked</p></div></section>
           <div class="letters grid grid-cols-5" aria-hidden="true"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
           <div id="card" class="grid grid-cols-5 gap-2" role="group" aria-label="5 by 5 bingo card"></div>
           <div id="status" class="card-status" role="status" aria-live="polite"></div>
@@ -82,15 +82,28 @@ for (let index = 0; index < 25; index++) {
   card.append(button); cells.push(button);
 }
 
+let displayedPatternCard = session.game.card;
+document.querySelector('#solo-pattern-toggle')!.addEventListener('click', event => {
+  const details = document.querySelector('#solo-pattern-details')!;
+  const expanded = details.classList.toggle('expanded');
+  (event.currentTarget as HTMLButtonElement).setAttribute('aria-expanded', String(expanded));
+});
+
 function render() {
   if (expired(session.expiresAt)) { session = newSession(); expiryNotice = 'Your previous session expired after 24 hours without activity. A fresh solo session has started.'; }
   clearTimeout(expiryTimer);
   expiryTimer = setTimeout(render, Math.max(1, session.expiresAt - Date.now()));
   document.querySelector('#expiry-notice')!.textContent = expiryNotice;
   const game = session.game;
+  if (displayedPatternCard !== game.card) {
+    displayedPatternCard = game.card;
+    document.querySelector('#solo-pattern-details')!.classList.remove('expanded');
+    document.querySelector('#solo-pattern-toggle')!.setAttribute('aria-expanded', 'false');
+  }
   const pattern = getPattern(game.pattern);
   const targets = new Set(pattern.squares);
   document.querySelector('#pattern-name')!.textContent = pattern.name;
+  document.querySelector('#solo-pattern-toggle')!.textContent = pattern.name;
   document.querySelector('#pattern-help')!.textContent = patternHelp(game.pattern);
   document.querySelector('#prize-name')!.textContent = game.prize.name;
   document.querySelector('#prize-benefit')!.textContent = `+1 to one ${game.prize.qualifyingRoll}.`;

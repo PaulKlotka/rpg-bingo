@@ -8,7 +8,7 @@ import { collection, connectFirestoreEmulator, doc, getDocFromServer, getFiresto
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import QRCode from 'qrcode';
 import { PRIZES } from './prizes';
-import type { MultiplayerAward, Player, Room } from '../shared/multiplayer';
+import type { MultiplayerAward, Player, Room, RoundResult } from '../shared/multiplayer';
 
 const id = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(16).padStart(8, '0')).join('');
 const escape = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]!));
@@ -64,6 +64,9 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   let room: Room | undefined;
   let player: Player | undefined;
   let awards: MultiplayerAward[] = [];
+  let roundHistory: RoundResult[] = [];
+  let historyLoaded = false;
+  let historyError = '';
   let online = false;
   let busy = false;
   let message = '';
@@ -100,6 +103,9 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     unsubscribes.forEach(unsubscribe => unsubscribe()); unsubscribes = [];
     if (roomId) { pendingLeaves.add(roomId); saveLeaves(); void drainLeaves(); }
     roomId = ''; room = undefined; player = undefined; awards = []; previousPhase = undefined;
+    roundHistory = []; historyLoaded = false; historyError = '';
+    document.querySelector<HTMLElement>('#history-empty')!.hidden = false;
+    document.querySelector('#history-results')!.replaceChildren();
     online = false; busy = false; pendingRoll = undefined; message = '';
     renderJoin();
   }
@@ -120,6 +126,10 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
       render();
     }, error => { online = false; message = errorText(error); render(); }));
     unsubscribes.push(onSnapshot(doc(db, 'rooms', roomId, 'players', uid), snapshot => { player = snapshot.data() as Player | undefined; render(); }, error => { message = errorText(error); render(); }));
+    unsubscribes.push(onSnapshot(query(collection(db, 'rooms', roomId, 'rounds'), orderBy('round')), snapshot => {
+      roundHistory = snapshot.docs.map(document => document.data() as RoundResult);
+      historyLoaded = true; historyError = ''; render();
+    }, error => { historyError = errorText(error); render(); }));
     unsubscribes.push(onSnapshot(query(collection(db, 'rooms', roomId, 'players', uid, 'awards'), orderBy('round')), snapshot => {
       awards = snapshot.docs.map(d => d.data() as MultiplayerAward); render();
     }, error => { message = errorText(error); render(); }));
@@ -167,6 +177,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   function render() {
     if (!isOpen()) return;
     if (!room) { renderJoin(); return; }
+    document.querySelector<HTMLElement>('#history-empty')!.hidden = true;
     delete root.dataset.page;
     if (room.phase === 'shared' && previousPhase === 'inviting') showPage('game');
     previousPhase = room.phase;
@@ -222,11 +233,14 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
         <p class="session-message" role="status">${escape(message)}</p>
         ${pendingRoll && !busy ? '<button id="retry-roll" class="new-card" type="button">Retry the same submission safely</button>' : ''}
       </section>`;
+    const historyPanel = `<section class="how-panel round-history-panel" data-page="history" aria-label="Shared round history"><h2 class="section-label">SHARED SESSION RESULTS</h2><p class="awards-intro">${sessionExpired ? 'This shared session has expired.' : room.phase === 'inviting' ? 'Shared play has not started yet.' : pendingBingo ? `Round ${room.round} is under review. Winners and rewards appear here after confirmation.` : `Round ${room.round} is in progress. No winner confirmed yet.`}</p>${historyError ? `<p class="session-message" role="status">Round history could not be loaded: ${escape(historyError)}</p>` : !historyLoaded ? '<p class="awards-intro" role="status">Loading confirmed rounds…</p>' : roundHistory.length ? `<table class="round-history-table"><caption>Confirmed rounds and rewards for this shared room</caption><thead><tr><th scope="col">Round</th><th scope="col">Winner(s)</th><th scope="col">Reward</th></tr></thead><tbody>${roundHistory.map(result => `<tr><th scope="row">${result.round}</th><td>${result.winners.map(winner => `<span class="round-history-winner">${escape(winner.name)}</span>`).join('')}</td><td>${escape(result.prize)}</td></tr>`).join('')}</tbody></table>` : '<p class="awards-intro">No confirmed rounds yet.</p>'}<p class="prize-help">Canceled bingos do not appear. Every tied winner receives the listed reward. History belongs to this shared session.</p></section>`;
     root.innerHTML = `
+      ${historyPanel}
       ${room.phase === 'shared' ? '' : `${sessionPanel}${!hostInviting ? `<section class="how-panel" data-page="game"><h2 class="section-label">${sessionExpired ? 'SESSION EXPIRED' : 'WAITING FOR SHARED PLAY'}</h2><p class="awards-intro">${escape(status)}</p><p class="prize-help">Open Shared Room in the menu to see the players or leave.</p></section>` : ''}`}
       ${room.phase === 'shared' ? `<div class="game-layout grid gap-5 md:grid-cols-[1fr_260px]"><section class="card-panel" data-page="game"><div class="flex items-center justify-between gap-2 mb-4"><h2 class="section-label">YOUR SHARED-ROUND CARD</h2><span class="state-pill">${pendingBingo ? 'REVIEWING BINGO' : active ? 'IN PLAY' : 'WAITING'}</span></div><section class="prize-panel"><p class="eyebrow">THIS ROUND’S SHARED PRIZE</p><h3><span class="shared-prize-desktop-title">${escape(room.prize)}</span><button id="shared-prize-toggle" class="shared-prize-toggle" type="button" aria-expanded="${prizeDetailsExpanded}" aria-controls="shared-prize-description">${escape(room.prize)}</button></h3><p id="shared-prize-description" class="awards-intro shared-prize-description ${prizeDetailsExpanded ? 'expanded' : ''}">+1 to one ${escape(offeredPrize?.qualifyingRoll ?? 'qualifying roll')}. Every player with bingo on the winning roll earns it.</p></section><section class="pattern-panel" aria-label="Shared winning pattern"><p class="eyebrow">EVERYONE’S WINNING PATTERN</p><h3><span class="pattern-desktop-title">${escape(pattern.name)}</span><button id="shared-pattern-toggle" class="pattern-toggle" type="button" aria-expanded="${patternDetailsExpanded}" aria-controls="shared-pattern-details">${escape(pattern.name)}</button></h3><div id="shared-pattern-details" class="pattern-details ${patternDetailsExpanded ? 'expanded' : ''}"><p>${escape(patternHelp(room.pattern))}</p><p class="pattern-legend">◇ Outline = target · Green fill = marked · Darker green = latest roll</p></div></section>${confirmedNotice}<div class="shared-card-stage">${active ? `<div class="grid grid-cols-5 gap-2" role="group" aria-label="Your shared-round bingo card">${player!.card!.map((n, i) => `<button type="button" class="cell ${n !== null && n === latestNumber && room!.marks.includes(n) ? 'latest-number' : ''} ${targets.has(i) ? 'pattern-target' : ''} ${n === null ? 'free' : ''} ${n === null || room!.marks.includes(n) ? 'marked' : ''}" ${n === null || (!allowed && !(canUndo && n === room!.undo?.number)) ? 'disabled' : ''} data-number="${n ?? ''}" aria-pressed="${n === null || room!.marks.includes(n)}" aria-label="Row ${Math.floor(i / 5) + 1}, column ${i % 5 + 1}: ${n ?? 'free'}${n !== null && n === latestNumber && room!.marks.includes(n) ? ', latest shared number' : ''}${canUndo && n === room!.undo?.number ? ', tap again to undo your latest roll' : ''}${n === null || room!.marks.includes(n) ? ', marked' : ', unmarked'}${targets.has(i) ? (pattern.id === 'single-line' || pattern.id === 'two-lines' ? ', example pattern square' : ', required pattern square') : ''}">${n === null ? '<span class="free-star">✧</span><span class="free-label">FREE</span>' : n}</button>`).join('')}</div><p class="card-status">${canUndo ? `Tap ${room.undo!.number} again on your card to undo your latest roll for everyone${pendingBingo ? " before the countdown ends" : ""}.` : pendingBingo ? "Cards are locked while bingo is reviewed." : "Tap a numbered square to submit that roll for everyone. Matching squares stay marked."}</p>` : '<p class="awards-intro">No active card yet. The next completed round will deal you a fresh card with everyone else. You can leave this room anytime to return to solo play and create a new invite.</p>'}${bingoNotice}</div></section>
       <aside class="flex flex-col gap-5"><section class="roll-panel" data-page="game"><p class="eyebrow">SHARED d20</p><button id="shared-die" class="die-button" aria-label="Roll a shared twenty-sided die" ${allowed ? '' : 'disabled'}>${die}<span id="shared-die-face">${room.lastAction?.number ?? 20}</span></button><p class="roll-title">Roll for everyone</p><p class="muted">${escape(status)}</p>${room.undo?.uid === uid && room.undo.round === room.round ? `<button id="undo-roll" class="new-card w-full" type="button" ${canUndo ? '' : 'disabled'}>${pendingBingo ? 'Undo winning roll' : 'Undo my last roll'} (${room.undo.number})</button><p class="prize-help">${pendingBingo ? "Undo this entry before the countdown ends to resume the same cards." : "Restores everyone’s previous marks. Available until another player submits or the round ends."}</p>` : ''}${room.lastUndo ? `<p class="prize-help" role="status">${escape(room.lastUndo.name)} undid ${room.lastUndo.number}. Previous shared marks restored.</p>` : ''}</section>${sessionPanel}<section class="how-panel" data-page="instructions"><h2 class="section-label">SHARED PLAY</h2><p class="prize-help">Card taps and die rolls both count. Only the last submitter must wait for someone else. Any two active players can alternate, even in a larger group.</p><p class="prize-help">Bingo pauses play for fifteen seconds. The latest submitter can undo during review; otherwise the win confirms and fresh cards are dealt automatically.</p><p class="awards-intro">${room.lastAction ? `Last accepted: ${escape(room.lastAction.name)} rolled ${room.lastAction.number} in round ${room.lastAction.round}.` : 'No rolls yet.'}</p><p class="prize-help">Marked numbers: ${room.marks.join(', ') || 'none yet'}</p></section></aside></div>` : ''}
       ${!hostInviting ? `<section class="awards-panel" data-page="rewards"><h2 class="section-label">WON THIS SESSION</h2><p class="awards-intro">+1 to one qualifying roll. Declare before rolling; use once. The session and unused prizes expire after 24 hours without game activity. One bingo prize per roll; attack bonuses affect accuracy, not damage. Proposed house rules, not official Starfinder rewards.</p><ul class="awards-list">${confirmedAwards.map(a => `<li class="award-item ${a.used ? 'used' : ''}"><div><h3>${escape(a.prize)}</h3><p>Confirmed round ${a.round} · +1 to one ${escape(PRIZES.find(p => p.name === a.prize)?.qualifyingRoll ?? 'qualifying roll')}.</p></div><button data-award="${a.round}" data-used="${a.used}" aria-pressed="${a.used}" aria-label="${escape(a.prize)}, round ${a.round}: ${a.used ? 'used, mark unused' : 'unused, mark used'}" ${busy || !online || sessionExpired ? 'disabled' : ''}>${a.used ? 'Used · Undo' : 'Mark used'}</button></li>`).join('')}</ul>${confirmedAwards.length ? '' : '<p class="prize-help">No confirmed prizes earned in this session yet.</p>'}<p class="save-status">Only confirmed bingos earn prizes; undoing a pending bingo earns no prize. Saved to your anonymous player in this session. Session and unused prizes expire after 24 hours without game activity. Your solo prizes remain separate below.</p></section>` : ''}`;
+    document.querySelector('#history-results')!.replaceChildren(root.querySelector('.round-history-panel')!);
     root.querySelector('#room-controls')!.append(inviteControl, leaveControl);
     root.querySelector('#shared-prize-toggle')?.addEventListener('click', event => {
       prizeDetailsExpanded = !prizeDetailsExpanded;

@@ -19,13 +19,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <a class="brand flex items-center gap-2.5" href="/" aria-label="RPG Games home"><span class="brand-die">${die}</span>RPG<span class="font-normal text-slate-400">Games</span></a>
       <span class="edition">AT THE TABLE</span>
     </header>
-    <nav class="page-navigation" aria-label="Main menu"><span id="current-page">Game</span><details id="page-menu"><summary aria-label="Menu"><svg class="menu-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary><div class="page-menu-links"><a href="#game" data-page-link="game">Game</a><a href="#room" data-page-link="room">Shared Room</a><a href="#instructions" data-page-link="instructions">Instructions</a><a href="#rewards" data-page-link="rewards">Rewards</a></div></details></nav>
+    <nav class="page-navigation" aria-label="Main menu"><span id="current-page">Game</span><details id="page-menu"><summary aria-label="Menu"><svg class="menu-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary><div class="page-menu-links"><a href="#game" data-page-link="game">Game</a><a href="#room" data-page-link="room">Shared Room</a><a href="#instructions" data-page-link="instructions">Instructions</a><a href="#rewards" data-page-link="rewards">Rewards</a><a href="#history" data-page-link="history">Round History</a></div></details></nav>
     <main>
       <div class="intro flex flex-wrap items-end justify-between gap-4">
         <div><p class="eyebrow">YOUR SIDE QUEST STARTS HERE</p><h1>Roll. Mark. <span>Bingo.</span></h1><p class="subtitle">A little extra adventure at your table.</p></div>
         <span class="system-tag"><span></span>STARFINDER · SECOND EDITION</span>
       </div>
-      <h2 class="page-heading" data-page="room">Shared Room</h2><h2 class="page-heading" data-page="instructions">Instructions</h2><h2 class="page-heading" data-page="rewards">Rewards</h2>
+      <h2 class="page-heading" data-page="room">Shared Room</h2><h2 class="page-heading" data-page="instructions">Instructions</h2><h2 class="page-heading" data-page="rewards">Rewards</h2><h2 class="page-heading" data-page="history">Round History</h2>
       <div id="session-controls-fallback" data-page="room"></div>
       <div id="shared-panel-home"><section id="multiplayer" hidden aria-label="Group session"></section></div>
       <section id="solo-game"><p id="expiry-notice" class="session-message" role="status"></p>
@@ -58,6 +58,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <p class="awards-intro">Declare a prize before its qualifying roll. Mark it used afterward; you can undo a mistake.</p>
         <p id="awards-empty" class="prize-help">No prizes won yet. Complete the winning pattern to earn your card’s prize.</p><ul id="awards" class="awards-list"></ul><p id="save-status" class="save-status" role="status"></p>
       </section>
+      <div id="history-results" data-page="history"></div>
+      <section id="history-empty" class="how-panel" data-page="history"><h3 class="section-label">NO SHARED ROOM OPEN</h3><p class="awards-intro">Join or create a Shared Room from the menu to see its confirmed rounds, winners, and rewards.</p></section>
       <section id="room-page" data-page="room"></section>
       <section id="instructions-page" data-page="instructions"></section>
     </main>
@@ -189,6 +191,7 @@ document.querySelector('#leave-room')!.addEventListener('click', () => {
   document.querySelector<HTMLElement>('#multiplayer')!.hidden = true;
   document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = true;
   document.querySelector<HTMLElement>('#solo-game')!.hidden = false;
+  document.querySelector<HTMLElement>('#history-empty')!.hidden = false;
   document.querySelector('.invite-entry p')!.textContent = 'Keep playing solo while invited players wait for your next card.';
   document.querySelector('#awards-heading')!.textContent = 'SOLO PRIZES';
   showPage('game');

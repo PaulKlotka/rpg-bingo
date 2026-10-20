@@ -1,4 +1,4 @@
-const pages = { game: 'Game', room: 'Shared Room', instructions: 'Instructions', rewards: 'Rewards' };
+const pages = { game: 'Game', room: 'Shared Room', instructions: 'Instructions', rewards: 'Rewards', history: 'Round History' };
 export type Page = keyof typeof pages;
 
 export function showPage(page: Page) {

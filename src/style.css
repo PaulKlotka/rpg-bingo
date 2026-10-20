@@ -61,6 +61,13 @@ body:not([data-page="game"]) .game-layout > aside { display: contents; }
 .page-heading { font-size: 22px; font-weight: 650; margin: 18px 0; }
 #instructions-page .how-panel { margin-bottom: 16px; }
 body:not([data-page="game"]) .intro { display: none; }
+body:not([data-page="history"]) [data-page="history"], body[data-page="history"] [data-page]:not([data-page="history"]) { display: none !important; }
+.round-history-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 16px; text-align: left; font-size: 13px; }
+.round-history-table caption { text-align: left; color: #a1b5ae; font-size: 12px; padding-bottom: 12px; }
+.round-history-table th, .round-history-table td { padding: 12px 8px; border-bottom: 1px solid #ffffff19; vertical-align: top; overflow-wrap: anywhere; }
+.round-history-table th:first-child { width: 60px; }
+.round-history-table thead { color: #cdfc81; }
+.round-history-winner { display: block; margin-bottom: 4px; }
 @media (max-width: 767px) { .intro { padding: 14px 0; } .intro .eyebrow, .intro .subtitle, .intro .system-tag { display: none; } }
 .prize-panel { border: 1px solid #cdfc8135; background: #cdfc8106; padding: 14px 16px; margin-bottom: 18px; border-radius: 9px; }
 .prize-panel .eyebrow { font-size: 9px; margin-bottom: 5px; }

@@ -14,7 +14,7 @@ const id = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.t
 const escape = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]!));
 const errorText = (error: unknown) => error instanceof Error ? error.message.replace(/^Firebase:\s*/, '').replace(/\s*\(functions\/[^)]+\)\.?$/, '') : 'Could not reach the game service. Please try again.';
 
-export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die: string, isOpen: () => boolean = () => true): Promise<{onNextCard(): Promise<boolean>; leave?(): void}> {
+export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die: string, isOpen: () => boolean = () => true, canStartImmediately: () => boolean = () => false): Promise<{onNextCard(): Promise<boolean>; leave?(): void}> {
   const controlsHome = document.querySelector<HTMLElement>('#session-controls-home')!;
   const inviteControl = document.querySelector<HTMLElement>('.invite-entry')!;
   const leaveControl = document.querySelector<HTMLElement>('#leave-room-panel')!;
@@ -80,6 +80,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   let prizeDetailsExpanded = false;
   let patternDetailsExpanded = false;
   let previousPhase: Room['phase'] | undefined;
+  let attemptedUntouchedStart = '';
   let unsubscribes: (() => void)[] = [];
   const queueKey = `rpg-games.pending-leaves.${uid}`;
   let pendingLeaves = new Set<string>();
@@ -152,12 +153,13 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     root.dataset.page = 'room';
     restoreControls();
     document.querySelector(!roomId && !solo.hidden ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
-    root.innerHTML = `<section class="how-panel"><h2 class="section-label">${roomId ? 'JOIN THIS SESSION' : 'INVITE A PLAYER'}</h2><p class="awards-intro">${roomId ? 'Join with a display name. If no numbers are marked yet, you get a card now; otherwise you join the next round.' : 'Keep your current solo card. Invited players join the next card when you choose New Card.'}</p><form id="join-session" class="session-form"><label for="player-name">Your display name</label><input id="player-name" maxlength="32" required autocomplete="nickname" placeholder="e.g. Captain Nova"><button type="submit" class="new-card" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : roomId ? 'Join session' : 'Show invite QR & link'}</button></form><p class="session-message" role="status">${escape(message)}</p></section>`;
+    root.innerHTML = `<section class="how-panel"><h2 class="section-label">${roomId ? 'JOIN THIS SESSION' : 'INVITE A PLAYER'}</h2><p class="awards-intro">${roomId ? 'Join with a display name. If no numbers are marked yet, you get a card now; otherwise you join the next round.' : 'If your solo card has no marks, open shared play now. Otherwise keep playing solo and choose New Card to start together. Your solo progress stays saved.'}</p><form id="join-session" class="session-form"><label for="player-name">Your display name</label><input id="player-name" maxlength="32" required autocomplete="nickname" placeholder="e.g. Captain Nova"><button type="submit" class="new-card" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : roomId ? 'Join session' : 'Show invite QR & link'}</button></form><p class="session-message" role="status">${escape(message)}</p></section>`;
     root.querySelector('form')!.addEventListener('submit', async event => {
       event.preventDefault();
       if (busy) return;
       const name = root.querySelector<HTMLInputElement>('#player-name')!.value.trim();
       const creating = !roomId;
+      const startImmediately = creating && canStartImmediately();
       const target = roomId || id();
       const started = epoch;
       busy = true; message = ''; renderJoin();
@@ -165,10 +167,10 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
         await drainLeaves();
         if (pendingLeaves.has(target)) throw new Error('Reconnect before rejoining this room, or create a new invite from solo play.');
         if (started !== epoch || !isOpen()) return;
-        await call({ action: creating ? 'create' : 'join', roomId: target, name });
+        await call({ action: creating ? 'create' : 'join', roomId: target, name, ...(creating ? { startImmediately } : {}) });
         if (started !== epoch || !isOpen()) { pendingLeaves.add(target); saveLeaves(); void drainLeaves(); return; }
         roomId = target;
-        if (!creating) showPage('game');
+        if (!creating || startImmediately) showPage('game');
         subscribe();
       } catch (error) { if (started === epoch) message = errorText(error); }
       finally { if (started === epoch) { busy = false; if (!room) renderJoin(); } }
@@ -198,6 +200,12 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     clearTimeout(expiryTimer);
     if (room.expiresAt && !sessionExpired) expiryTimer = setTimeout(render, Math.max(1, room.expiresAt - Date.now()));
     const hostInviting = !sessionExpired && room.phase === 'inviting' && room.creator === uid;
+    const startKey = `${roomId}:${room.revision}`;
+    if (hostInviting && room.members.length >= 2 && canStartImmediately() && online && !busy && attemptedUntouchedStart !== startKey) {
+      attemptedUntouchedStart = startKey;
+      const started = epoch;
+      void call({ action: 'start', roomId }).catch(error => { if (started === epoch) { message = errorText(error); render(); } });
+    }
     document.querySelector(hostInviting ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
     solo.hidden = !hostInviting;
     inviteControl.querySelector('p')!.textContent = room.phase === 'shared'
@@ -298,7 +306,10 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     solo.hidden = true;
     try {
       const existing = await getDocFromServer(doc(db, 'rooms', roomId, 'players', uid));
-      if (existing.exists() && !existing.get('left')) subscribe(); else { showPage('room'); renderJoin(); }
+      if (existing.exists() && !existing.get('left')) {
+        if (existing.get('card') === null) await call({ action: 'join', roomId, name: existing.get('name') });
+        subscribe();
+      } else { showPage('room'); renderJoin(); }
     } catch (error) { message = errorText(error); showPage('room'); renderJoin(); }
   } else renderJoin();
   return {

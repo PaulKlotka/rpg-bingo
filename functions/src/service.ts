@@ -38,21 +38,29 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
           if (roomSnapshot.get('creator') === uid) return { roomId: data.roomId };
           throw new HttpsError('already-exists', 'That session already exists.');
         }
+        const startImmediately = data.startImmediately === true;
         const room: Room = {
-          phase: 'inviting', creator: uid, round: 0, revision: 0, rolls: 0, marks: [], prize: '', expiresAt: nextExpiry(),
+          phase: startImmediately ? 'shared' : 'inviting', creator: uid, round: startImmediately ? 1 : 0, revision: 0, rolls: 0, marks: [], prize: startImmediately ? prize() : '', expiresAt: nextExpiry(),
+          ...(startImmediately ? { pattern: selectPattern(random) } : {}),
           members: [{ uid, name, eligibleRound: 1 }], lastSubmitter: null, lastAction: null, lastResult: null,
         };
         tx.create(roomRef, room);
-        tx.create(playerRef, { name, card: null, eligibleRound: 1 } satisfies Player);
+        tx.create(playerRef, { name, card: startImmediately ? card() : null, eligibleRound: 1 } satisfies Player);
       } else {
         if (!roomSnapshot.exists) throw new HttpsError('not-found', 'Session not found. Check the link.');
         const room = roomSnapshot.data() as Room;
         requireLive(room);
         if (room.closed) throw new HttpsError('failed-precondition', 'Everyone has left this session. Start a new invite from solo play.');
-        if (playerSnapshot.exists && !playerSnapshot.get('left')) return { roomId: data.roomId };
+        const joinCurrent = room.phase === 'shared' && room.marks.length === 0 && !room.pendingBingo;
+        if (playerSnapshot.exists && !playerSnapshot.get('left')) {
+          if (joinCurrent && playerSnapshot.get('eligibleRound') > room.round) {
+            tx.update(playerRef, { card: card(), eligibleRound: room.round });
+            tx.update(roomRef, { members: room.members.map(member => member.uid === uid ? { ...member, eligibleRound: room.round } : member), revision: room.revision + 1, expiresAt: nextExpiry() });
+          }
+          return { roomId: data.roomId };
+        }
         // Bound transaction size; even a tied win stays below Firestore write limits.
         if (room.members.length >= 100) throw new HttpsError('resource-exhausted', 'This session is full (100 players).');
-        const joinCurrent = room.phase === 'shared' && room.marks.length === 0 && !room.pendingBingo;
         const eligibleRound = joinCurrent ? room.round : room.round + 1;
         tx.set(playerRef, { name, eligibleRound, card: joinCurrent ? card() : null, left: false } satisfies Player);
         tx.update(roomRef, { members: [...room.members, { uid, name, eligibleRound }], revision: room.revision + 1, expiresAt: nextExpiry() });
@@ -132,9 +140,15 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
       const undo = room.undo;
       if (room.phase !== 'shared' || actor.eligibleRound > room.round || !undo || undo.uid !== uid || room.lastSubmitter !== uid || undo.round !== room.round || undo.requestId !== data.rollRequestId) throw new HttpsError('failed-precondition', 'Only your latest roll can be undone, before another player submits or the round ends.');
       if (room.round !== data.round || room.revision !== data.revision) throw new HttpsError('aborted', 'The game changed. Check the latest state before undoing.');
+      const waiting = undo.marks.length === 0 ? room.members.filter(member => member.eligibleRound > room.round) : [];
+      const waitingPlayers = await Promise.all(waiting.map(member => tx.get(roomRef.collection('players').doc(member.uid))));
       const receipt = { undone: true, round: room.round, revision: room.revision + 1 };
+      for (const waitingPlayer of waitingPlayers) {
+        if (waitingPlayer.exists && !waitingPlayer.get('left')) tx.update(waitingPlayer.ref, { card: card(), eligibleRound: room.round });
+      }
       tx.update(roomRef, {
         marks: undo.marks, rolls: undo.rolls, lastSubmitter: undo.lastSubmitter,
+        members: room.members.map(member => waiting.some(waiter => waiter.uid === member.uid) ? { ...member, eligibleRound: room.round } : member),
         lastAction: undo.lastAction, undo: null, pendingBingo: null, lastUndo: { name: actor.name, number: undo.number, round: room.round },
         revision: receipt.revision, expiresAt: nextExpiry(),
       });

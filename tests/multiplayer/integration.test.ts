@@ -337,6 +337,62 @@ test('cleanup removes the full expired room tree while retaining live sessions',
   assert.equal((await admin.doc(`rooms/${liveRoom}`).get()).exists, true);
 });
 
+test('an untouched solo invite deals shared cards immediately but waits for two players before rolling', async () => {
+  const roomId = id();
+  await a.call({ action: 'create', roomId, name: 'Alpha', startImmediately: true });
+  const initial = await roomData(roomId);
+  const host = await playerData(roomId, a);
+  assert.equal(initial.phase, 'shared');
+  assert.equal(initial.round, 1);
+  assert.ok(isPattern(initial.pattern));
+  assert.ok(PRIZES.some(p => p.name === initial.prize));
+  assert.equal(host.card!.length, 25);
+  await rejectCode(send(a, roomId, 1), 'failed-precondition');
+  await b.call({ action: 'join', roomId, name: 'Beta' });
+  assert.equal((await playerData(roomId, b)).eligibleRound, 1);
+  assert.equal((await playerData(roomId, b)).card!.length, 25);
+  assert.deepEqual((await playerData(roomId, a)).card, host.card);
+  assert.equal((await roomData(roomId)).pattern, initial.pattern);
+  await a.call({ action: 'create', roomId, name: 'Alpha', startImmediately: true });
+  assert.deepEqual((await playerData(roomId, a)).card, host.card);
+  await send(a, roomId, 1);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.equal((await playerData(roomId, c)).card, null);
+  assert.equal((await playerData(roomId, c)).eligibleRound, 2);
+});
+
+test('undoing the first roll immediately admits players already waiting for the next card', async () => {
+  const roomId = await shared();
+  await send(a, roomId, 1);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.equal((await playerData(roomId, c)).card, null);
+  const before = await playerData(roomId, a);
+  await undo(a, roomId);
+  const room = await roomData(roomId);
+  assert.deepEqual(room.marks, []);
+  assert.equal(room.round, 1);
+  assert.equal((await playerData(roomId, c)).eligibleRound, 1);
+  assert.equal((await playerData(roomId, c)).card!.length, 25);
+  assert.equal(room.members.find(member => member.uid === c.uid)!.eligibleRound, 1);
+  assert.deepEqual((await playerData(roomId, a)).card, before.card);
+});
+
+test('a waiting player can resume an untouched round without redealing active cards', async () => {
+  const roomId = await shared();
+  await send(a, roomId, 1);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  // Represents a saved room from before waiting players were admitted on undo.
+  await admin.doc(`rooms/${roomId}`).update({ marks: [], rolls: 0 });
+  const hostCard = (await playerData(roomId, a)).card;
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  const admitted = await playerData(roomId, c);
+  assert.equal(admitted.eligibleRound, 1);
+  assert.equal(admitted.card!.length, 25);
+  assert.deepEqual((await playerData(roomId, a)).card, hostCard);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.deepEqual((await playerData(roomId, c)).card, admitted.card);
+});
+
 test('inviting does not deal cards or permit shared play before two active participants', async () => {
   const roomId = await invite();
   assert.equal((await roomData(roomId)).phase, 'inviting');

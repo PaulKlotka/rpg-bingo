@@ -44,7 +44,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <aside class="flex flex-col gap-5">
           <section class="roll-panel" aria-labelledby="roll-heading"><p class="eyebrow" id="roll-heading">LET FATE DECIDE</p><button id="roll" class="die-button" aria-label="Roll a twenty-sided die" type="button">${die}<span id="die-face">20</span></button><p class="roll-title">Roll a d20</p><p id="roll-help" class="muted">Matching numbers mark together.</p><div class="roll-result" role="status" aria-live="polite" aria-atomic="true"><span class="section-label">LAST ROLL</span><strong id="last-roll">—</strong><span id="roll-count">Ready when you are</span></div></section>
       <div id="session-controls-home" data-page="room">
-      <div class="invite-entry"><button id="invite-player" class="new-card" type="button">▦ Invite a player · Show QR / session link</button><p>Keep playing solo while invited players wait for your next card.</p></div>
+      <div class="invite-entry"><button id="invite-player" class="new-card" type="button">▦ Invite a player · Show QR / session link</button><p>An untouched solo card opens shared play immediately. Otherwise, finish solo and choose New Card to start together.</p></div>
       <div id="solo-invite-form"></div>
       <div id="leave-room-panel" class="leave-room-panel" hidden><button id="leave-room" class="new-card" type="button">Leave room · Return to solo</button><p class="prize-help">Return to your saved solo card. Create another session with Invite a player.</p></div>
       </div>
@@ -166,6 +166,7 @@ async function invite(openRoom = true) {
   if (openRoom) showPage('room');
   else if (!location.hash) showPage('game');
   const root = document.querySelector<HTMLElement>('#multiplayer')!; root.hidden = false;
+  document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = false;
   if (multiplayer) return;
   root.dataset.page = 'room';
   if (!new URLSearchParams(location.search).has('session') && !document.querySelector<HTMLElement>('#solo-game')!.hidden) {
@@ -179,7 +180,7 @@ async function invite(openRoom = true) {
   root.textContent = 'Opening session invite…';
   try {
     const { mountMultiplayer } = await import('./multiplayer');
-    const controller = await mountMultiplayer(root, document.querySelector<HTMLElement>('#solo-game')!, die, () => epoch === inviteEpoch);
+    const controller = await mountMultiplayer(root, document.querySelector<HTMLElement>('#solo-game')!, die, () => epoch === inviteEpoch, () => !session.game.won && session.game.marked.size === 0);
     if (epoch === inviteEpoch) multiplayer = controller; else controller.leave?.();
   } catch { root.textContent = 'The multiplayer service is not ready. Keep playing solo. Local setup: configure .env.local and run npm run emulators; see README.md.'; }
 }
@@ -192,7 +193,7 @@ document.querySelector('#leave-room')!.addEventListener('click', () => {
   document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = true;
   document.querySelector<HTMLElement>('#solo-game')!.hidden = false;
   document.querySelector<HTMLElement>('#history-empty')!.hidden = false;
-  document.querySelector('.invite-entry p')!.textContent = 'Keep playing solo while invited players wait for your next card.';
+  document.querySelector('.invite-entry p')!.textContent = 'An untouched solo card opens shared play immediately. Otherwise, finish solo and choose New Card to start together.';
   document.querySelector('#awards-heading')!.textContent = 'SOLO PRIZES';
   showPage('game');
   const url = new URL(location.href); url.searchParams.delete('session');

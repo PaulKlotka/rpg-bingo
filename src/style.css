@@ -50,7 +50,11 @@ body:not([data-page="game"]) .game-layout { display: block; }
 body:not([data-page="game"]) .game-layout > aside { display: contents; }
 .page-navigation { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; padding: 8px 0; background: #101c2bf5; border-bottom: 1px solid #ffffff19; }
 #current-page { color: #cdfc81; font-size: 15px; font-weight: 650; }
-#page-menu summary { cursor: pointer; padding: 12px 18px; border: 1px solid #82988c50; border-radius: 7px; min-height: 44px; }
+#page-menu summary { cursor: pointer; display: flex; align-items: center; justify-content: center; list-style: none; width: 48px; min-height: 48px; border: 1px solid #82988c50; border-radius: 7px; }
+#page-menu summary::-webkit-details-marker { display: none; }
+#page-menu summary::marker { content: ''; }
+#page-menu summary:focus-visible { outline: 3px solid #cdfc81; outline-offset: 4px; }
+.menu-icon { width: 24px; height: 24px; }
 .page-menu-links { position: absolute; right: 0; top: 100%; width: 220px; display: grid; padding: 8px; background: #19282b; border: 1px solid #82988c50; border-radius: 9px; box-shadow: 0 8px 24px #0008; }
 .page-menu-links a { padding: 13px; min-height: 44px; border-radius: 6px; }
 .page-menu-links a[aria-current="page"] { background: #cdfc8120; color: #cdfc81; }
@@ -61,6 +65,12 @@ body:not([data-page="game"]) .intro { display: none; }
 .prize-panel { border: 1px solid #cdfc8135; background: #cdfc8106; padding: 14px 16px; margin-bottom: 18px; border-radius: 9px; }
 .prize-panel .eyebrow { font-size: 9px; margin-bottom: 5px; }
 .prize-panel h3 { color: #e5f4d9; font-size: 19px; font-weight: 650; line-height: 1.3; }
+.shared-prize-toggle { display: none; }
+@media (max-width: 767px) {
+  .shared-prize-desktop-title { display: none; }
+  .shared-prize-toggle { display: block; min-height: 44px; text-align: left; text-decoration: underline dotted #a1b5ae; text-underline-offset: 5px; }
+  .shared-prize-description:not(.expanded) { display: none; }
+}
 #prize-benefit { color: #c6d9c4; font-size: 13px; line-height: 1.6; margin-top: 4px; }
 .prize-help { color: #96b0a2; font-size: 11px; margin-top: 5px; line-height: 1.6; }
 .prize-panel.earned { border-color: #cdfc81; background: #cdfc8114; }

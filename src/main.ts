@@ -19,7 +19,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <a class="brand flex items-center gap-2.5" href="/" aria-label="RPG Games home"><span class="brand-die">${die}</span>RPG<span class="font-normal text-slate-400">Games</span></a>
       <span class="edition">AT THE TABLE</span>
     </header>
-    <nav class="page-navigation" aria-label="Main menu"><span id="current-page">Game</span><details id="page-menu"><summary>Menu</summary><div class="page-menu-links"><a href="#game" data-page-link="game">Game</a><a href="#room" data-page-link="room">Shared Room</a><a href="#instructions" data-page-link="instructions">Instructions</a><a href="#rewards" data-page-link="rewards">Rewards</a></div></details></nav>
+    <nav class="page-navigation" aria-label="Main menu"><span id="current-page">Game</span><details id="page-menu"><summary aria-label="Menu"><svg class="menu-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary><div class="page-menu-links"><a href="#game" data-page-link="game">Game</a><a href="#room" data-page-link="room">Shared Room</a><a href="#instructions" data-page-link="instructions">Instructions</a><a href="#rewards" data-page-link="rewards">Rewards</a></div></details></nav>
     <main>
       <div class="intro flex flex-wrap items-end justify-between gap-4">
         <div><p class="eyebrow">YOUR SIDE QUEST STARTS HERE</p><h1>Roll. Mark. <span>Bingo.</span></h1><p class="subtitle">A little extra adventure at your table.</p></div>

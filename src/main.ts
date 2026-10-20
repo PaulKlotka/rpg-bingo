@@ -1,3 +1,4 @@
+import { mountNavigation, showPage } from './navigation';
 import { expired } from '../functions/src/shared/lifetime';
 import './style.css';
 import { isMarked } from './game';
@@ -18,12 +19,14 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <a class="brand flex items-center gap-2.5" href="/" aria-label="RPG Games home"><span class="brand-die">${die}</span>RPG<span class="font-normal text-slate-400">Games</span></a>
       <span class="edition">AT THE TABLE</span>
     </header>
+    <nav class="page-navigation" aria-label="Main menu"><span id="current-page">Game</span><details id="page-menu"><summary>Menu</summary><div class="page-menu-links"><a href="#game" data-page-link="game">Game</a><a href="#room" data-page-link="room">Shared Room</a><a href="#instructions" data-page-link="instructions">Instructions</a><a href="#rewards" data-page-link="rewards">Rewards</a></div></details></nav>
     <main>
       <div class="intro flex flex-wrap items-end justify-between gap-4">
         <div><p class="eyebrow">YOUR SIDE QUEST STARTS HERE</p><h1>Roll. Mark. <span>Bingo.</span></h1><p class="subtitle">A little extra adventure at your table.</p></div>
         <span class="system-tag"><span></span>STARFINDER · SECOND EDITION</span>
       </div>
-      <div id="session-controls-fallback"></div>
+      <h2 class="page-heading" data-page="room">Shared Room</h2><h2 class="page-heading" data-page="instructions">Instructions</h2><h2 class="page-heading" data-page="rewards">Rewards</h2>
+      <div id="session-controls-fallback" data-page="room"></div>
       <div id="shared-panel-home"><section id="multiplayer" hidden aria-label="Group session"></section></div>
       <section id="solo-game"><p id="expiry-notice" class="session-message" role="status"></p>
       <div class="game-layout grid gap-5 md:grid-cols-[1fr_260px]">
@@ -40,24 +43,31 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </section>
         <aside class="flex flex-col gap-5">
           <section class="roll-panel" aria-labelledby="roll-heading"><p class="eyebrow" id="roll-heading">LET FATE DECIDE</p><button id="roll" class="die-button" aria-label="Roll a twenty-sided die" type="button">${die}<span id="die-face">20</span></button><p class="roll-title">Roll a d20</p><p id="roll-help" class="muted">Matching numbers mark together.</p><div class="roll-result" role="status" aria-live="polite" aria-atomic="true"><span class="section-label">LAST ROLL</span><strong id="last-roll">—</strong><span id="roll-count">Ready when you are</span></div></section>
-      <div id="session-controls-home">
+      <div id="session-controls-home" data-page="room">
       <div class="invite-entry"><button id="invite-player" class="new-card" type="button">▦ Invite a player · Show QR / session link</button><p>Keep playing solo while invited players wait for your next card.</p></div>
       <div id="solo-invite-form"></div>
       <div id="leave-room-panel" class="leave-room-panel" hidden><button id="leave-room" class="new-card" type="button">Leave room · Return to solo</button><p class="prize-help">Return to your saved solo card. Create another session with Invite a player.</p></div>
       </div>
-          <section class="how-panel"><h2 class="section-label">HOW TO PLAY</h2><ol><li><span>01</span><p>Roll here, or tap a number to mark or unmark every match.</p></li><li><span>02</span><p>Complete this card’s winning pattern. The center is always free.</p></li><li><span>03</span><p>Bingo locks your card. Keep rolling, or start a new card.</p></li></ol></section>
+          <section class="how-panel"><h2 class="section-label">SOLO PLAY</h2><ol><li><span>01</span><p>Roll here, or tap a number to mark or unmark every match.</p></li><li><span>02</span><p>Complete this card’s winning pattern. The center is always free.</p></li><li><span>03</span><p>Bingo locks your card. Keep rolling, or start a new card.</p></li></ol></section>
           <section class="how-panel prize-rules" aria-labelledby="prize-rules-heading"><h2 id="prize-rules-heading" class="section-label">BINGO HOUSE RULES</h2><p>Each prize grants +1 to one qualifying roll. Declare it before rolling; use it once. The session and unused prizes expire after 24 hours without game activity. Only one bingo prize per roll.</p><p>Attack bonuses affect accuracy, not damage.</p><p class="house-rule-note">Proposed bingo house rules, not official Starfinder rewards.</p></section>
         </aside>
       </div>
       </section>
-      <section class="awards-panel" aria-labelledby="awards-heading">
-        <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="awards-heading" class="section-label">WON PRIZES</h2><p id="awards-count" class="prize-help" role="status" aria-live="polite"></p></div>
+      <section class="awards-panel" data-page="rewards" aria-labelledby="awards-heading">
+        <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="awards-heading" class="section-label">SOLO PRIZES</h2><p id="awards-count" class="prize-help" role="status" aria-live="polite"></p></div>
         <p class="awards-intro">Declare a prize before its qualifying roll. Mark it used afterward; you can undo a mistake.</p>
         <p id="awards-empty" class="prize-help">No prizes won yet. Complete the winning pattern to earn your card’s prize.</p><ul id="awards" class="awards-list"></ul><p id="save-status" class="save-status" role="status"></p>
       </section>
+      <section id="room-page" data-page="room"></section>
+      <section id="instructions-page" data-page="instructions"></section>
     </main>
     <footer class="flex flex-wrap justify-between gap-2"><span>ONE PLAYER. TWENTY SIDES. ENDLESS POSSIBILITIES.</span><span>Made for your next session.</span></footer>
   </div>`;
+
+document.querySelector('#room-page')!.append(document.querySelector('#session-controls-home')!, document.querySelector('#session-controls-fallback')!);
+document.querySelectorAll('#solo-game .card-panel, #solo-game .roll-panel').forEach(element => { (element as HTMLElement).dataset.page = 'game'; });
+document.querySelectorAll('#solo-game .how-panel').forEach(element => document.querySelector('#instructions-page')!.append(element));
+mountNavigation();
 
 const card = document.querySelector<HTMLDivElement>('#card')!;
 const cells: HTMLButtonElement[] = [];
@@ -137,8 +147,12 @@ function render() {
 document.querySelector('#roll')!.addEventListener('click', () => { session = rollSession(session); render(); });
 let multiplayer: { onNextCard(): Promise<boolean>; leave?(): void } | undefined;
 let inviteEpoch = 0;
-async function invite() {
+async function invite(openRoom = true) {
+  if (openRoom) showPage('room');
+  else if (!location.hash) showPage('game');
   const root = document.querySelector<HTMLElement>('#multiplayer')!; root.hidden = false;
+  if (multiplayer) return;
+  root.dataset.page = 'room';
   if (!new URLSearchParams(location.search).has('session') && !document.querySelector<HTMLElement>('#solo-game')!.hidden) {
     document.querySelector('#solo-invite-form')!.append(root);
   }
@@ -146,7 +160,6 @@ async function invite() {
   if (document.querySelector<HTMLElement>('#solo-game')!.hidden) {
     document.querySelector('#session-controls-fallback')!.append(document.querySelector('.invite-entry')!, document.querySelector('#leave-room-panel')!);
   }
-  if (multiplayer) return;
   const epoch = ++inviteEpoch;
   root.textContent = 'Opening session invite…';
   try {
@@ -155,7 +168,7 @@ async function invite() {
     if (epoch === inviteEpoch) multiplayer = controller; else controller.leave?.();
   } catch { root.textContent = 'The multiplayer service is not ready. Keep playing solo. Local setup: configure .env.local and run npm run emulators; see README.md.'; }
 }
-document.querySelector('#invite-player')!.addEventListener('click', invite);
+document.querySelector('#invite-player')!.addEventListener('click', () => { void invite(); });
 document.querySelector('#leave-room')!.addEventListener('click', () => {
   if (!multiplayer) inviteEpoch++;
   multiplayer?.leave?.();
@@ -164,16 +177,17 @@ document.querySelector('#leave-room')!.addEventListener('click', () => {
   document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = true;
   document.querySelector<HTMLElement>('#solo-game')!.hidden = false;
   document.querySelector('.invite-entry p')!.textContent = 'Keep playing solo while invited players wait for your next card.';
-  document.querySelector('#awards-heading')!.textContent = 'WON PRIZES';
+  document.querySelector('#awards-heading')!.textContent = 'SOLO PRIZES';
+  showPage('game');
   const url = new URL(location.href); url.searchParams.delete('session');
   history.replaceState(null, '', url.pathname + url.search + url.hash);
 });
 document.querySelector('#new-card')!.addEventListener('click', async () => {
   const button = document.querySelector<HTMLButtonElement>('#new-card')!; button.disabled = true;
   try {
-    if (await multiplayer?.onNextCard()) return;
+    if (await multiplayer?.onNextCard()) { showPage('game'); return; }
     session = nextCard(session); render();
   } finally { button.disabled = false; }
 });
 render();
-if (new URLSearchParams(location.search).has('session')) { document.querySelector<HTMLElement>('#solo-game')!.hidden = true; void invite(); }
+if (new URLSearchParams(location.search).has('session')) { document.querySelector<HTMLElement>('#solo-game')!.hidden = true; void invite(false); }

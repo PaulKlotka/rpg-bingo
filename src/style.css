@@ -121,4 +121,5 @@ aside .session-top { margin-bottom: 0; }
 .bingo-card-notice { position: absolute; z-index: 10; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(88%, 340px); padding: 16px; border: 2px solid #cdfc81; border-radius: 12px; background: #14271ef2; color: #e5f4d9; box-shadow: 0 6px 24px #0009; text-align: center; pointer-events: none; overflow-wrap: anywhere; }
 .bingo-card-notice strong { color: #cdfc81; font-size: 18px; }
 .bingo-card-notice p { font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.bingo-card-notice .bingo-overlay-undo { pointer-events: auto; min-height: 44px; width: 100%; margin-top: 10px; }
 @media (max-width: 767px) { .bingo-card-notice { padding: 12px; } .bingo-card-notice strong { font-size: 16px; } }

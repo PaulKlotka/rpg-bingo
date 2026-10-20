@@ -27,6 +27,14 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
   const roomRef = db.doc(`rooms/${data.roomId}`);
   const playerRef = roomRef.collection('players').doc(uid);
 
+  // Invite holders may check availability without reading private room/player data.
+  // This is read-only: reopening a page must never extend the session lifetime.
+  if (data.action === 'status') {
+    const snapshot = await roomRef.get();
+    const room = snapshot.data() as Room | undefined;
+    return { available: !!room && !room.closed && !expired(room.expiresAt), expiresAt: room?.expiresAt ?? null };
+  }
+
   if (data.action === 'create' || data.action === 'join') {
     if (typeof data.name !== 'string' || data.name.trim().length < 1 || data.name.trim().length > 32 || /[\x00-\x1f\x7f]/.test(data.name)) throw new HttpsError('invalid-argument', 'Enter a display name of 1–32 characters.');
     const name = data.name.trim();

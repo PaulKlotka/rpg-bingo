@@ -302,10 +302,26 @@ test('room reads and repeated joins do not prolong expiry; accepted play does', 
   const nearExpiry = Date.now() + 60000;
   await admin.doc(`rooms/${roomId}`).update({ expiresAt: nearExpiry });
   await getDocFromServer(doc(a.db, 'rooms', roomId));
+  assert.deepEqual(await outsider.call({ action: 'status', roomId }), { available: true, expiresAt: nearExpiry });
   await b.call({ action: 'join', roomId, name: 'Beta' });
   assert.equal((await roomData(roomId)).expiresAt, nearExpiry);
   await send(a, roomId, 1);
   assert.ok((await roomData(roomId)).expiresAt! > Date.now() + SESSION_IDLE_MS - 10000);
+});
+
+test('availability identifies expired, closed and removed rooms without exposing game data or mutating them', async () => {
+  const roomId = await invite();
+  const deadline = Date.now() - 1;
+  await admin.doc(`rooms/${roomId}`).update({ expiresAt: deadline });
+  const before = await roomData(roomId);
+  assert.deepEqual(await a.call({ action: 'status', roomId }), { available: false, expiresAt: deadline });
+  assert.deepEqual(await roomData(roomId), before);
+  await admin.doc(`rooms/${roomId}`).update({ expiresAt: Date.now() + 60000, closed: true });
+  assert.equal((await outsider.call({ action: 'status', roomId })).available, false);
+  await admin.recursiveDelete(admin.doc(`rooms/${roomId}`));
+  assert.deepEqual(await a.call({ action: 'status', roomId }), { available: false, expiresAt: null });
+  assert.equal((await admin.doc(`rooms/${roomId}`).get()).exists, false);
+  await rejectCode(anonymous.call({ action: 'status', roomId }), 'unauthenticated');
 });
 
 test('expired rooms reject joins, rolls, starts and prize use but still permit leaving', async () => {
@@ -327,8 +343,10 @@ test('cleanup removes the full expired room tree while retaining live sessions',
   await seedCards(roomId, Array.from({ length: 25 }, (_, i) => i === 12 ? null : 1));
   await send(a, roomId, 1);
   const liveRoom = await invite();
-  await admin.doc(`rooms/${roomId}`).update({ expiresAt: Date.now() - 1 });
-  await cleanupExpiredRooms(admin);
+  // Isolate this fixture from older expired demo rooms and the 20-room batch limit.
+  const cleanupTime = 0;
+  await admin.doc(`rooms/${roomId}`).update({ expiresAt: cleanupTime - 1 });
+  await cleanupExpiredRooms(admin, cleanupTime);
   assert.equal((await admin.doc(`rooms/${roomId}`).get()).exists, false);
   assert.equal((await admin.collection(`rooms/${roomId}/players`).get()).size, 0);
   assert.equal((await admin.collection(`rooms/${roomId}/players/${a.uid}/awards`).get()).size, 0);

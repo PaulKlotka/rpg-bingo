@@ -14,7 +14,7 @@ const id = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.t
 const escape = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]!));
 const errorText = (error: unknown) => error instanceof Error ? error.message.replace(/^Firebase:\s*/, '').replace(/\s*\(functions\/[^)]+\)\.?$/, '') : 'Could not reach the game service. Please try again.';
 
-export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die: string, isOpen: () => boolean = () => true, canStartImmediately: () => boolean = () => false): Promise<{onNextCard(): Promise<boolean>; leave?(): void}> {
+export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die: string, isOpen: () => boolean = () => true, canStartImmediately: () => boolean = () => false, onSessionEnded: () => void = () => {}): Promise<{onNextCard(): Promise<boolean>; leave?(): void}> {
   const controlsHome = document.querySelector<HTMLElement>('#session-controls-home')!;
   const inviteControl = document.querySelector<HTMLElement>('.invite-entry')!;
   const leaveControl = document.querySelector<HTMLElement>('#leave-room-panel')!;
@@ -82,6 +82,8 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   let previousPhase: Room['phase'] | undefined;
   let attemptedUntouchedStart = '';
   let unsubscribes: (() => void)[] = [];
+  let checkingAvailability: Promise<boolean> | undefined;
+  let checkedExpiredDeadline: number | undefined;
   const queueKey = `rpg-games.pending-leaves.${uid}`;
   let pendingLeaves = new Set<string>();
   try { pendingLeaves = new Set(JSON.parse(localStorage.getItem(queueKey) || '[]')); } catch { /* Storage may be unavailable. */ }
@@ -101,6 +103,9 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   void drainLeaves();
   function leave() {
     epoch++; clearTimeout(expiryTimer); clearTimeout(reviewTimer);
+    window.removeEventListener('focus', resumeSession);
+    window.removeEventListener('online', resumeSession);
+    document.removeEventListener('visibilitychange', resumeSession);
     unsubscribes.forEach(unsubscribe => unsubscribe()); unsubscribes = [];
     if (roomId) { pendingLeaves.add(roomId); saveLeaves(); void drainLeaves(); }
     roomId = ''; room = undefined; player = undefined; awards = []; previousPhase = undefined;
@@ -112,6 +117,36 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   }
 
 
+  function endSession() {
+    if (!isOpen() || !roomId) return;
+    leave();
+    onSessionEnded();
+  }
+  function checkAvailability(): Promise<boolean> {
+    if (checkingAvailability) return checkingAvailability;
+    if (!isOpen() || !roomId) return Promise.resolve(false);
+    const started = epoch;
+    const target = roomId;
+    checkingAvailability = (async () => {
+      const response = await call({ action: 'status', roomId: target });
+      if (!isOpen() || epoch !== started || roomId !== target) return false;
+      const status = response.data as { available: boolean; expiresAt: number | null };
+      if (!status.available) { endSession(); return false; }
+      if (room && typeof status.expiresAt === 'number') room = { ...room, expiresAt: status.expiresAt };
+      return true;
+    })().finally(() => { checkingAvailability = undefined; });
+    return checkingAvailability;
+  }
+  function resumeSession() {
+    if (document.visibilityState === 'hidden' || !isOpen() || !roomId) return;
+    void checkAvailability().then(available => { if (available) render(); }).catch(() => {
+      if (isOpen()) { message = 'Reconnect to check whether this shared session is still available.'; render(); }
+    });
+  }
+  window.addEventListener('focus', resumeSession);
+  window.addEventListener('online', resumeSession);
+  document.addEventListener('visibilitychange', resumeSession);
+
   const joinUrl = () => {
     const origin = emulated && import.meta.env.VITE_PUBLIC_ORIGIN ? import.meta.env.VITE_PUBLIC_ORIGIN : location.origin;
     const url = new URL(location.pathname, origin);
@@ -122,10 +157,10 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     history.replaceState(null, '', `${location.pathname}?session=${roomId}${location.hash}`);
     unsubscribes.push(onSnapshot(doc(db, 'rooms', roomId), { includeMetadataChanges: true }, snapshot => {
       room = snapshot.data() as Room | undefined;
-      if (!room) message = 'This session has ended. Leave the room to return to solo play and create a new invite.';
+      if (!room && !snapshot.metadata.fromCache) resumeSession();
       online = !snapshot.metadata.fromCache;
       render();
-    }, error => { online = false; message = errorText(error); render(); }));
+    }, error => { online = false; message = errorText(error); resumeSession(); render(); }));
     unsubscribes.push(onSnapshot(doc(db, 'rooms', roomId, 'players', uid), snapshot => { player = snapshot.data() as Player | undefined; render(); }, error => { message = errorText(error); render(); }));
     unsubscribes.push(onSnapshot(query(collection(db, 'rooms', roomId, 'rounds'), orderBy('round')), snapshot => {
       roundHistory = snapshot.docs.map(document => document.data() as RoundResult);
@@ -184,6 +219,10 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     if (room.phase === 'shared' && previousPhase === 'inviting') showPage('game');
     previousPhase = room.phase;
     const sessionExpired = expired(room.expiresAt);
+    if (sessionExpired && checkedExpiredDeadline !== room.expiresAt) {
+      checkedExpiredDeadline = room.expiresAt;
+      resumeSession();
+    }
     clearTimeout(reviewTimer);
     const pendingBingo = room.pendingBingo;
     const reviewSeconds = pendingBingo ? Math.max(0, Math.ceil((pendingBingo.confirmAt - Date.now()) / 1000)) : 0;
@@ -217,7 +256,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     const allowed = active && !pendingBingo && enoughPlayers && room.lastSubmitter !== uid && online && !busy && !pendingRoll;
     const canUndo = active && (!pendingBingo || reviewSeconds > 0) && room.undo?.uid === uid && room.undo.round === room.round && room.lastSubmitter === uid && online && !busy && !pendingRoll;
     const lastName = room.members.find(m => m.uid === room!.lastSubmitter)?.name ?? 'another player';
-    const status = pendingBingo && !sessionExpired ? (reviewSeconds > 0 ? 'Bingo review: cards locked for ' + reviewSeconds + ' seconds.' : 'Confirming bingo when connected…') : sessionExpired ? 'This session expired after 24 hours without activity. Leave the room to return to solo play and create a new invite.' : !online ? 'Reconnecting… Shared submissions are paused.' : busy ? 'Submitting… Please wait for the server.' : !active ? 'Waiting for the next card. You cannot submit a shared roll yet. You can leave the room to return to solo play.' : !enoughPlayers ? 'Shared play needs two active players. You can leave the room to play solo or create a new invite.' : room.lastSubmitter === uid ? 'Your roll was accepted. A different active player must submit next.' : room.lastSubmitter === null ? 'Any active player may submit the first roll.' : `You may submit. Any active player except ${lastName} may submit.`;
+    const status = pendingBingo && !sessionExpired ? (reviewSeconds > 0 ? 'Bingo review: cards locked for ' + reviewSeconds + ' seconds.' : 'Confirming bingo when connected…') : sessionExpired ? 'Checking whether this shared session is still available…' : !online ? 'Reconnecting… Shared submissions are paused.' : busy ? 'Submitting… Please wait for the server.' : !active ? 'Waiting for the next card. You cannot submit a shared roll yet. You can leave the room to return to solo play.' : !enoughPlayers ? 'Shared play needs two active players. You can leave the room to play solo or create a new invite.' : room.lastSubmitter === uid ? 'Your roll was accepted. A different active player must submit next.' : room.lastSubmitter === null ? 'Any active player may submit the first roll.' : `You may submit. Any active player except ${lastName} may submit.`;
     const link = joinUrl();
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(link).hostname);
     const offeredPrize = PRIZES.find(p => p.name === room!.prize);
@@ -305,12 +344,19 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
   if (roomId) {
     solo.hidden = true;
     try {
+      if (!await checkAvailability()) return { leave, onNextCard: async () => false };
       const existing = await getDocFromServer(doc(db, 'rooms', roomId, 'players', uid));
       if (existing.exists() && !existing.get('left')) {
         if (existing.get('card') === null) await call({ action: 'join', roomId, name: existing.get('name') });
         subscribe();
       } else { showPage('room'); renderJoin(); }
-    } catch (error) { message = errorText(error); showPage('room'); renderJoin(); }
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'functions/failed-precondition' || code === 'permission-denied' || code === 'not-found') {
+        try { if (!await checkAvailability()) return { leave, onNextCard: async () => false }; } catch { /* Retain the room while its availability is unknown. */ }
+      }
+      if (isOpen()) { message = errorText(error); showPage('room'); renderJoin(); }
+    }
   } else renderJoin();
   return {
     leave,

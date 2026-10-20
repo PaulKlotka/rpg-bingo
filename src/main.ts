@@ -180,14 +180,15 @@ async function invite(openRoom = true) {
   root.textContent = 'Opening session invite…';
   try {
     const { mountMultiplayer } = await import('./multiplayer');
-    const controller = await mountMultiplayer(root, document.querySelector<HTMLElement>('#solo-game')!, die, () => epoch === inviteEpoch, () => !session.game.won && session.game.marked.size === 0);
+    const controller = await mountMultiplayer(root, document.querySelector<HTMLElement>('#solo-game')!, die, () => epoch === inviteEpoch, () => !session.game.won && session.game.marked.size === 0, () => returnToSolo('Your shared session has ended. You are back in solo play.', false));
     if (epoch === inviteEpoch) multiplayer = controller; else controller.leave?.();
   } catch { root.textContent = 'The multiplayer service is not ready. Keep playing solo. Local setup: configure .env.local and run npm run emulators; see README.md.'; }
 }
 document.querySelector('#invite-player')!.addEventListener('click', () => { void invite(); });
-document.querySelector('#leave-room')!.addEventListener('click', () => {
-  if (!multiplayer) inviteEpoch++;
-  multiplayer?.leave?.();
+function returnToSolo(notice = '', leaveRoom = true) {
+  inviteEpoch++;
+  if (leaveRoom) multiplayer?.leave?.();
+  multiplayer = undefined;
   document.querySelector('#session-controls-home')!.append(document.querySelector('.invite-entry')!, document.querySelector('#leave-room-panel')!);
   document.querySelector<HTMLElement>('#multiplayer')!.hidden = true;
   document.querySelector<HTMLElement>('#leave-room-panel')!.hidden = true;
@@ -198,7 +199,10 @@ document.querySelector('#leave-room')!.addEventListener('click', () => {
   showPage('game');
   const url = new URL(location.href); url.searchParams.delete('session');
   history.replaceState(null, '', url.pathname + url.search + url.hash);
-});
+  if (notice) expiryNotice = notice;
+  render();
+}
+document.querySelector('#leave-room')!.addEventListener('click', () => returnToSolo());
 document.querySelector('#new-card')!.addEventListener('click', async () => {
   const button = document.querySelector<HTMLButtonElement>('#new-card')!; button.disabled = true;
   try {

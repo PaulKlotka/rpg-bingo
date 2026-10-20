@@ -118,6 +118,9 @@ footer { padding: 25px 0; margin-top: 24px; border-top: 1px solid #ffffff12; col
 aside .session-top { margin-bottom: 0; }
 
 .shared-card-stage { position: relative; }
+.bingo-confirmed-notice { margin-bottom: 16px; padding: 12px; border: 1px solid #cdfc81; border-radius: 10px; background: #14271e; color: #e5f4d9; overflow-wrap: anywhere; }
+.bingo-confirmed-notice strong { color: #cdfc81; }
+.bingo-confirmed-notice p { font-size: 12px; line-height: 1.5; margin-top: 6px; }
 .bingo-card-notice { position: absolute; z-index: 10; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(88%, 340px); padding: 16px; border: 2px solid #cdfc81; border-radius: 12px; background: #14271ef2; color: #e5f4d9; box-shadow: 0 6px 24px #0009; text-align: center; pointer-events: none; overflow-wrap: anywhere; }
 .bingo-card-notice strong { color: #cdfc81; font-size: 18px; }
 .bingo-card-notice p { font-size: 12px; line-height: 1.5; margin-top: 6px; }

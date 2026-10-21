@@ -205,7 +205,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
         await call({ action: creating ? 'create' : 'join', roomId: target, name, ...(creating ? { startImmediately } : {}) });
         if (started !== epoch || !isOpen()) { pendingLeaves.add(target); saveLeaves(); void drainLeaves(); return; }
         roomId = target;
-        if (!creating || startImmediately) showPage('game');
+        showPage(creating ? 'room' : 'game');
         subscribe();
       } catch (error) { if (started === epoch) message = errorText(error); }
       finally { if (started === epoch) { busy = false; if (!room) renderJoin(); } }

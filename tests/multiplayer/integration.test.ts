@@ -198,7 +198,10 @@ test('real fifteen-second review rejects late undo and confirms tied awards exac
   const pending = await roomData(roomId);
   assert.ok(pending.pendingBingo!.confirmAt >= started + 15000);
   await c.call({ action: 'join', roomId, name: 'Gamma' });
-  assert.equal((await playerData(roomId, c)).card, null);
+  assert.equal((await playerData(roomId, c)).card!.length, 25);
+  assert.equal((await playerData(roomId, c)).eligibleRound, 1);
+  assert.deepEqual((await roomData(roomId)).pendingBingo, pending.pendingBingo);
+  await rejectCode(send(c, roomId, 2), 'failed-precondition');
   await new Promise(resolve => setTimeout(resolve, Math.max(0, pending.pendingBingo!.confirmAt - Date.now()) + 30));
   await rejectCode(undo(a, roomId), 'failed-precondition');
   const payload = { action: 'confirm', roomId, round: 1, pendingId: pending.pendingBingo!.requestId };
@@ -375,15 +378,16 @@ test('an untouched solo invite deals shared cards immediately but waits for two 
   assert.deepEqual((await playerData(roomId, a)).card, host.card);
   await send(a, roomId, 1);
   await c.call({ action: 'join', roomId, name: 'Gamma' });
-  assert.equal((await playerData(roomId, c)).card, null);
-  assert.equal((await playerData(roomId, c)).eligibleRound, 2);
+  assert.equal((await playerData(roomId, c)).card!.length, 25);
+  assert.equal((await playerData(roomId, c)).eligibleRound, 1);
 });
 
-test('undoing the first roll immediately admits players already waiting for the next card', async () => {
+test('undoing the first roll clears inherited marks without replacing a late joiner card', async () => {
   const roomId = await shared();
   await send(a, roomId, 1);
   await c.call({ action: 'join', roomId, name: 'Gamma' });
-  assert.equal((await playerData(roomId, c)).card, null);
+  const joined = await playerData(roomId, c);
+  assert.equal(joined.card!.length, 25);
   const before = await playerData(roomId, a);
   await undo(a, roomId);
   const room = await roomData(roomId);
@@ -391,22 +395,26 @@ test('undoing the first roll immediately admits players already waiting for the 
   assert.equal(room.round, 1);
   assert.equal((await playerData(roomId, c)).eligibleRound, 1);
   assert.equal((await playerData(roomId, c)).card!.length, 25);
+  assert.deepEqual((await playerData(roomId, c)).card, joined.card);
   assert.equal(room.members.find(member => member.uid === c.uid)!.eligibleRound, 1);
   assert.deepEqual((await playerData(roomId, a)).card, before.card);
 });
 
-test('a waiting player can resume an untouched round without redealing active cards', async () => {
+test('a legacy waiting player can resume a played round without redealing active cards', async () => {
   const roomId = await shared();
   await send(a, roomId, 1);
   await c.call({ action: 'join', roomId, name: 'Gamma' });
-  // Represents a saved room from before waiting players were admitted on undo.
-  await admin.doc(`rooms/${roomId}`).update({ marks: [], rolls: 0 });
+  // Represents a saved membership created under the old mid-round waiting rule.
+  const oldRoom = await roomData(roomId);
+  await admin.doc(`rooms/${roomId}/players/${c.uid}`).update({ card: null, eligibleRound: 2 });
+  await admin.doc(`rooms/${roomId}`).update({ members: oldRoom.members.map(m => m.uid === c.uid ? { ...m, eligibleRound: 2 } : m) });
   const hostCard = (await playerData(roomId, a)).card;
   await c.call({ action: 'join', roomId, name: 'Gamma' });
   const admitted = await playerData(roomId, c);
   assert.equal(admitted.eligibleRound, 1);
   assert.equal(admitted.card!.length, 25);
   assert.deepEqual((await playerData(roomId, a)).card, hostCard);
+  assert.deepEqual((await roomData(roomId)).marks, [1]);
   await c.call({ action: 'join', roomId, name: 'Gamma' });
   assert.deepEqual((await playerData(roomId, c)).card, admitted.card);
 });
@@ -496,14 +504,30 @@ test('virtual then physical submissions also enforce alternation', async () => {
   assert.deepEqual(await roomData(roomId), before);
 });
 
-test('mid-round joiners have no card, receive no retroactive marks, and cannot submit', async () => {
+test('mid-round joiners receive random active cards with previous numbers marked and can submit', async () => {
   const roomId = await shared(); await seedCards(roomId); await send(a, roomId, 1);
-  await c.call({ action: 'join', roomId, name: 'Gamma' });
-  const waiting = await playerData(roomId, c);
-  assert.equal(waiting.card, null); assert.equal(waiting.eligibleRound, 2);
+  await send(b, roomId, 2);
   const before = await roomData(roomId);
-  await rejectCode(send(c, roomId, 2), 'failed-precondition');
-  assert.deepEqual(await roomData(roomId), before);
+  const hostCard = (await playerData(roomId, a)).card;
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  const joined = await playerData(roomId, c);
+  assert.equal(joined.eligibleRound, before.round);
+  assert.equal(joined.card!.length, 25); assert.equal(joined.card![12], null);
+  assert.equal(new Set(joined.card!.filter(n => n !== null)).size, 20);
+  const after = await roomData(roomId);
+  assert.deepEqual(after.marks, [1, 2]);
+  assert.ok(joined.card!.filter(n => n !== null && after.marks.includes(n)).length >= 2);
+  assert.ok(joined.card!.some(n => n !== null && !after.marks.includes(n)));
+  assert.equal(after.rolls, before.rolls); assert.equal(after.lastSubmitter, before.lastSubmitter);
+  assert.equal(after.pattern, before.pattern); assert.equal(after.prize, before.prize);
+  assert.deepEqual(after.undo, before.undo);
+  assert.deepEqual((await playerData(roomId, a)).card, hostCard);
+  await c.call({ action: 'join', roomId, name: 'Gamma' });
+  assert.deepEqual(await playerData(roomId, c), joined);
+  assert.deepEqual(await roomData(roomId), after);
+  await send(c, roomId, 3, { holdBingo: true });
+  assert.deepEqual((await roomData(roomId)).marks, [1, 2, 3]);
+  assert.equal((await roomData(roomId)).lastSubmitter, c.uid);
 });
 
 test('a player joining an untouched round receives a fresh active card and shares its existing pattern', async () => {
@@ -521,7 +545,7 @@ test('a player joining an untouched round receives a fresh active card and share
   assert.equal((await roomData(roomId)).lastSubmitter, c.uid);
 });
 
-test('join racing the first roll either joins untouched play or waits, without receiving a partially played card', async () => {
+test('join racing the first roll always deals an active card using the committed shared marks', async () => {
   const roomId = await shared(); await seedCards(roomId);
   const room = await roomData(roomId);
   const results = await Promise.allSettled([
@@ -529,9 +553,14 @@ test('join racing the first roll either joins untouched play or waits, without r
     a.call({ action: 'roll', roomId, round: room.round, revision: room.revision, kind: 'physical', number: 1, requestId: id() }),
   ]);
   assert.equal(results[0].status, 'fulfilled');
-  const joined = await playerData(roomId, c); const after = await roomData(roomId);
-  if (joined.eligibleRound === 1) assert.equal(joined.card!.length, 25);
-  else { assert.equal(joined.eligibleRound, 2); assert.equal(joined.card, null); assert.deepEqual(after.marks, [1]); }
+  const joined = await playerData(roomId, c);
+  assert.equal(joined.eligibleRound, 1); assert.equal(joined.card!.length, 25);
+  if (results[1].status === 'rejected') {
+    assert.equal(results[1].reason.code, 'functions/aborted');
+    await send(a, roomId, 1);
+  }
+  assert.deepEqual((await roomData(roomId)).marks, [1]);
+  assert.ok(joined.card!.some(n => n === 1));
 });
 
 test('after the first roll is undone, a new player can join the now untouched round', async () => {
@@ -597,9 +626,11 @@ test('simultaneous different-player requests using an old revision accept only o
   assert.equal((await roomData(roomId)).rolls, 1);
 });
 
-test('one atomic tied win awards all winners once, admits waiters and resets everyone', async () => {
+test('one atomic tied win awards all winners once and resets everyone including late joiners', async () => {
   const roomId = await shared(); await seedCards(roomId);
   await send(a, roomId, 1); await c.call({ action: 'join', roomId, name: 'Gamma' });
+  // Keep this tied-win fixture deterministic now that Gamma is active immediately.
+  await admin.doc(`rooms/${roomId}/players/${c.uid}`).update({ card: Array.from({ length: 25 }, (_, i) => i === 12 ? null : 20) });
   await send(b, roomId, 2); await send(a, roomId, 3); await send(b, roomId, 4);
   const old = await roomData(roomId);
   const payload = { action: 'roll', roomId, round: old.round, revision: old.revision, kind: 'physical', number: 5, requestId: id() };

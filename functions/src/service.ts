@@ -59,7 +59,9 @@ export async function command(db: Firestore, uid: string | undefined, input: unk
         const room = roomSnapshot.data() as Room;
         requireLive(room);
         if (room.closed) throw new HttpsError('failed-precondition', 'Everyone has left this session. Start a new invite from solo play.');
-        const joinCurrent = room.phase === 'shared' && room.marks.length === 0 && !room.pendingBingo;
+        // Cards use the room's marks, so late arrivals inherit every called number.
+        // An existing bingo review keeps its original winners and deadline.
+        const joinCurrent = room.phase === 'shared';
         if (playerSnapshot.exists && !playerSnapshot.get('left')) {
           if (joinCurrent && playerSnapshot.get('eligibleRound') > room.round) {
             tx.update(playerRef, { card: card(), eligibleRound: room.round });

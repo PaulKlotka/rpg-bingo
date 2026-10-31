@@ -188,7 +188,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     root.dataset.page = 'room';
     restoreControls();
     document.querySelector(!roomId && !solo.hidden ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
-    root.innerHTML = `<section class="how-panel"><h2 class="section-label">${roomId ? 'JOIN THIS SESSION' : 'INVITE A PLAYER'}</h2><p class="awards-intro">${roomId ? 'Join with a display name. If no numbers are marked yet, you get a card now; otherwise you join the next round.' : 'If your solo card has no marks, open shared play now. Otherwise keep playing solo and choose New Card to start together. Your solo progress stays saved.'}</p><form id="join-session" class="session-form"><label for="player-name">Your display name</label><input id="player-name" maxlength="32" required autocomplete="nickname" placeholder="e.g. Captain Nova"><button type="submit" class="new-card" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : roomId ? 'Join session' : 'Show invite QR & link'}</button></form><p class="session-message" role="status">${escape(message)}</p></section>`;
+    root.innerHTML = `<section class="how-panel"><h2 class="section-label">${roomId ? 'JOIN THIS SESSION' : 'INVITE A PLAYER'}</h2><p class="awards-intro">${roomId ? 'Join with a display name. You get a random card immediately with all previously rolled numbers already marked. If shared play has not started, your card arrives when the host starts it.' : 'If your solo card has no marks, open shared play now. Otherwise keep playing solo and choose New Card to start together. Your solo progress stays saved.'}</p><form id="join-session" class="session-form"><label for="player-name">Your display name</label><input id="player-name" maxlength="32" required autocomplete="nickname" placeholder="e.g. Captain Nova"><button type="submit" class="new-card" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : roomId ? 'Join session' : 'Show invite QR & link'}</button></form><p class="session-message" role="status">${escape(message)}</p></section>`;
     root.querySelector('form')!.addEventListener('submit', async event => {
       event.preventDefault();
       if (busy) return;
@@ -248,7 +248,7 @@ export async function mountMultiplayer(root: HTMLElement, solo: HTMLElement, die
     document.querySelector(hostInviting ? '#solo-invite-form' : '#shared-panel-home')!.append(root);
     solo.hidden = !hostInviting;
     inviteControl.querySelector('p')!.textContent = room.phase === 'shared'
-      ? 'Invite more players. Join now if no numbers are marked; otherwise wait for the next round.'
+      ? 'Invite more players. Join now with a random card and all previously rolled numbers already marked.'
       : 'Keep playing solo while invited players wait for your next card.';
     document.querySelector('#awards-heading')!.textContent = 'SOLO PRIZES';
     const active = !sessionExpired && room.phase === 'shared' && player?.eligibleRound === room.round && player.card !== null;

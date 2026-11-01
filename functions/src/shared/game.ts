@@ -18,7 +18,7 @@ export function rollD20(random: () => number = Math.random): number {
   return Math.floor(random() * 20) + 1;
 }
 
-export function newGame(random: () => number = Math.random, prizeRandom: () => number = Math.random, patternRandom: () => number = Math.random): Game {
+export function generateCard(random: () => number = Math.random): (number | null)[] {
   const shuffle = (values: number[]) => {
     for (let i = values.length - 1; i > 0; i--) {
       const j = Math.floor(random() * (i + 1));
@@ -30,6 +30,11 @@ export function newGame(random: () => number = Math.random, prizeRandom: () => n
   const duplicates = shuffle([...numbers]).slice(0, 4);
   const card: (number | null)[] = shuffle([...numbers, ...duplicates]);
   card.splice(12, 0, null);
+  return card;
+}
+
+export function newGame(random: () => number = Math.random, prizeRandom: () => number = Math.random, patternRandom: () => number = Math.random): Game {
+  const card = generateCard(random);
   return {
     card, pattern: selectPattern(patternRandom),
     prize: selectPrize(prizeRandom),

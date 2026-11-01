@@ -13,6 +13,8 @@
     "build:functions": "npm --prefix functions run build",
     "emulators": "npm run build:functions && node scripts/emulators.mjs",
     "test:multiplayer": "tsx --test tests/multiplayer/*.test.ts",
+    "test:embedded": "tsx --test --test-concurrency=1 tests/embedded/*.test.ts",
+    "test:full-integration": "tsx --test --test-concurrency=1 tests/integration/*.test.ts",
     "preview": "vite preview --host 0.0.0.0 --configLoader runner",
     "test": "tsx --test tests/*.test.ts"
   },

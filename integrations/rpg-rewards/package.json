@@ -1,0 +1,38 @@
+{
+  "name": "rpg-rewards",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite --configLoader runner --host 127.0.0.1",
+    "demo:game": "tsx demo/game-server.ts",
+    "typecheck": "tsc --noEmit && tsc -p functions/tsconfig.json --noEmit",
+    "build": "npm run typecheck && npm --prefix functions run build && vite build --configLoader runner",
+    "test": "tsx --test tests/unit/*.test.ts",
+    "test:integration": "tsx --test --test-concurrency=1 tests/integration/*.test.ts",
+    "test:browser": "playwright test",
+    "test:live": "playwright test --config playwright.live.config.ts",
+    "firebase": "node scripts/firebase.mjs",
+    "deploy": "npm run build && node scripts/firebase.mjs deploy --only firestore:rules,firestore:indexes,functions,hosting --project rpg-rewards-paul --non-interactive && node scripts/configure-player-endpoint.cjs",
+    "emulators": "npm --prefix functions run build && node scripts/emulators.mjs",
+    "verify:emulators": "npm --prefix functions run build && node scripts/emulators.mjs verify"
+  },
+  "dependencies": {
+    "firebase": "^13.0.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "firebase-admin": "^14.5.0",
+    "firebase-tools": "^15.34.0",
+    "jsqr": "^1.4.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}

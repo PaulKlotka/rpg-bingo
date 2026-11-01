@@ -10,8 +10,16 @@
   },
   "hosting": {
     "public": "dist",
+    "rewrites": [
+      { "source": "/embeddedApi", "function": { "functionId": "embeddedApi", "region": "us-central1" } },
+      { "source": "/embed", "destination": "/index.html" },
+      { "source": "/embed/", "destination": "/index.html" }
+    ],
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "headers": [
+      { "source": "/embed{,/**}", "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors https://between-turns-paul.web.app" }
+      ] },
       { "source": "**", "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Cache-Control", "value": "no-cache" },

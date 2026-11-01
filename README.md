@@ -1,5 +1,13 @@
 # RPG Games
 
+**Between Turns integration:** `/embed` now implements Bingo's side of the hub
+handoff, central identity/session context, game validation and durable Rewards
+settlement/completion flow. It does not use standalone authentication, session
+controls, navigation or prize inventory. The central Rewards adapter and hub
+registration are now deployed. Open https://between-turns-paul.web.app to play.
+See [integration status and contract](docs/INTEGRATION.md). The standalone behavior described below remains
+available at `/`.
+
 A phone-friendly bingo companion for Starfinder Second Edition. Built with plain TypeScript, Tailwind CSS, and Vite, without a UI framework. Single-player runs locally with browser saving. Optional shared play uses anonymous Firebase Authentication, Firestore, and a trusted callable function. No account signup or analytics.
 
 **Multiplayer setup, architecture, and manual cloud deployment:** see [MULTIPLAYER.md](MULTIPLAYER.md). Production project: `rpg-bingo-paul`. See the deployment status below.

@@ -1,0 +1,12 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+const env = { ...process.env, XDG_CONFIG_HOME: path.resolve('.firebase-config'), FIREBASE_EMULATORS_PATH: path.resolve('.emulator-cache'), NODE_USE_SYSTEM_CA: '1' };
+const java = 'C:/Program Files/Android/Android Studio/jbr/bin';
+if (process.platform === 'win32' && existsSync(path.join(java, 'java.exe'))) env.PATH = `${java};${env.PATH}`;
+const verify = process.argv[2] === 'verify';
+const args = [verify ? 'emulators:exec' : 'emulators:start', '--project', 'demo-between-turns', '--only', 'auth,firestore,functions'];
+if (verify) args.push('npm run test:integration && npm run test:browser');
+const child = spawn(process.execPath, [path.resolve('node_modules/firebase-tools/lib/bin/firebase.js'), ...args], { stdio: 'inherit', env });
+child.on('exit', code => process.exit(code ?? 1));
+process.on('SIGINT', () => child.kill('SIGINT'));

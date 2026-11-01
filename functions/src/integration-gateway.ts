@@ -35,7 +35,7 @@ export class RemoteGateway implements IntegrationGateway {
   context(c: CentralContext) { return this.request<CentralContext>('hub', { action: 'context', sessionId: c.sessionId, playerId: c.playerId, runId: c.runId }); }
   activity(c: CentralContext, eventId: string) { return this.request('hub', { action: 'activity', sessionId: c.sessionId, playerId: c.playerId, runId: c.runId, eventId }); }
   draw(c: CentralContext) {
-    return this.request<RewardOffer>('rewards', { action: 'draw', sessionId: c.sessionId, playerId: c.playerId, runId: c.runId, requestId: eventId('offer', c.runId) });
+    return this.request<RewardOffer>('rewards', { action: 'draw', sessionId: c.sessionId, playerId: c.playerId, runId: c.runId, requestId: eventId(`offer/${c.playerId}`, c.runId) });
   }
   settle(c: CentralContext, offerId: string, winnerIds: string[]) {
     return this.request<{ receipt: string }>('rewards', { action: 'settle', sessionId: c.sessionId, runId: c.runId, offerId, winnerIds, requestId: eventId('settle', c.runId) });

@@ -58,7 +58,7 @@ export class EmbeddedService {
     });
     const run = (await ref.get()).data() as EmbeddedRun;
     if (!run.offer) {
-      const offer = await this.gateway.draw({ ...c, playerId: run.offerPlayerId });
+      const offer = await this.gateway.draw(c);
       requireValue(id(offer.id) && !!offer.reward && typeof offer.reward.name === 'string' && typeof offer.reward.qualifyingRoll === 'string', 'Rewards returned an invalid offer.');
       await this.db.runTransaction(async tx => {
         const current = (await tx.get(ref)).data() as EmbeddedRun;

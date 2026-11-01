@@ -1,13 +1,13 @@
 import { completedPatterns } from './patterns';
 
 export interface CentralContext {
-  version: 1; playerId: string; displayName: string; sessionId: string; runId: string; expiresAt: number;
+  version: 1; playerId: string; displayName: string; sessionId: string; runId: string; expiresAt: number; accountId?: string | null; photoURL?: string | null;
 }
 export interface RewardOffer { id: string; reward: { id: string; name: string; qualifyingRoll: string } }
 export interface EmbeddedRun {
   sessionId: string; runId: string; phase: 'playing' | 'review' | 'settling' | 'complete';
   pattern: string; offer: RewardOffer | null; offerPlayerId: string; revision: number; marks: number[]; rolls: number;
-  players: Record<string, { name: string; card: (number | null)[] }>;
+  players: Record<string, { name: string; photoURL?: string | null; card: (number | null)[] }>;
   last: { number: number; playerId: string } | null;
   undo: { playerId: string; marks: number[]; rolls: number; last: EmbeddedRun['last']; eventId: string } | null;
   pending: { winnerIds: string[]; confirmAt: number } | null;

@@ -40,7 +40,9 @@ export class EmbeddedService {
     requireValue(typeof credential === 'string' && /^[A-Za-z0-9_-]{43}$/.test(credential), 'Connect through Between Turns.');
     const connection = (await this.db.doc(`embeddedConnections/${hash(credential)}`).get()).data() as BrowserConnection | undefined;
     requireValue(connection?.context && connection.expiresAt > this.now(), 'Refresh to reconnect through Between Turns.');
-    return this.gateway.context(connection.context);
+    const current = await this.gateway.context(connection.context);
+    requireValue((current.accountId ?? null) === (connection.context.accountId ?? null), 'Identity changed. Reconnect through Between Turns.');
+    return current;
   }
   private async ensureRun(c: CentralContext) {
     const ref = this.runRef(c);
@@ -49,11 +51,13 @@ export class EmbeddedService {
       const run = snapshot.data() as EmbeddedRun | undefined;
       if (!run) {
         tx.create(ref, { sessionId: c.sessionId, runId: c.runId, phase: 'playing', pattern: selectPattern(random), offer: null, offerPlayerId: c.playerId, revision: 0, marks: [], rolls: 0,
-          players: { [c.playerId]: { name: c.displayName, card: generateCard(random) } }, last: null, undo: null, pending: null, settlement: null,
+          players: { [c.playerId]: { name: c.displayName, photoURL: c.photoURL ?? null, card: generateCard(random) } }, last: null, undo: null, pending: null, settlement: null,
         } satisfies EmbeddedRun);
       } else if (!run.players[c.playerId] && ['playing', 'review'].includes(run.phase)) {
         requireValue(Object.keys(run.players).length < 32, 'This game is full.');
-        tx.update(ref, { players: { ...run.players, [c.playerId]: { name: c.displayName, card: generateCard(random) } }, revision: run.revision + 1 });
+        tx.update(ref, { players: { ...run.players, [c.playerId]: { name: c.displayName, photoURL: c.photoURL ?? null, card: generateCard(random) } }, revision: run.revision + 1 });
+      } else if (run.players[c.playerId] && (run.players[c.playerId].name !== c.displayName || (run.players[c.playerId].photoURL ?? null) !== (c.photoURL ?? null))) {
+        tx.update(ref, { players: { ...run.players, [c.playerId]: { ...run.players[c.playerId], name: c.displayName, photoURL: c.photoURL ?? null } }, revision: run.revision + 1 });
       }
     });
     const run = (await ref.get()).data() as EmbeddedRun;
@@ -114,7 +118,7 @@ export class EmbeddedService {
       phase: run.phase, revision: run.revision, marks: run.marks, rolls: run.rolls, last: run.last,
       canUndo: run.undo?.playerId === c.playerId && (!run.pending || this.now() < run.pending.confirmAt),
       pending: run.pending, winners: run.settlement?.winnerIds ?? run.pending?.winnerIds ?? [],
-      players: Object.entries(run.players).map(([playerId, p]) => ({ playerId, name: p.name })), serverNow: this.now() };
+      players: Object.entries(run.players).map(([playerId, p]) => ({ playerId, name: p.name, photoURL: p.photoURL ?? null })), serverNow: this.now() };
   }
   private async flushActivity(c: CentralContext) {
     const events = await this.runRef(c).collection('activity').orderBy('revision').get();

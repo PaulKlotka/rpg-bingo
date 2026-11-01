@@ -7,12 +7,12 @@ interface View {
   playerId: string; card: (number | null)[] | null; pattern: string; offer: RewardOffer | null;
   phase: string; revision: number; marks: number[]; rolls: number; last: { number: number; playerId: string } | null;
   canUndo: boolean; pending: { winnerIds: string[]; confirmAt: number } | null; winners: string[];
-  players: { playerId: string; name: string }[]; serverNow: number;
+  players: { playerId: string; name: string; photoURL?: string | null }[]; serverNow: number;
 }
 export async function mountEmbedded() {
   const root = document.querySelector<HTMLDivElement>('#app')!;
   document.documentElement.classList.add('embedded-page');
-  root.innerHTML = `<main class="embed-shell"><header class="embed-heading"><h1>RPG Bingo</h1>
+  root.innerHTML = `<main class="embed-shell"><header class="embed-heading"><h1>RPG Bingo</h1><span id="embed-player" class="embedded-player"></span>
     <p id="embed-message" role="status" aria-live="polite">Connecting to Between Turns.</p>
     <button id="embed-retry" class="new-card" hidden>Retry</button></header>
     <section id="embed-game" class="card-panel" hidden><div class="embed-details"><section><h2 id="embed-pattern"></h2><p id="embed-help"></p></section>
@@ -50,6 +50,16 @@ export async function mountEmbedded() {
   }
   function render() {
     if (!view) return;
+    const me = view.players.find(p => p.playerId === view!.playerId);
+    const label = root.querySelector<HTMLElement>('#embed-player')!;
+    label.replaceChildren();
+    if (me) {
+      const icon = document.createElement('span'); icon.className = 'embedded-avatar'; icon.textContent = me.name.slice(0, 1).toUpperCase();
+      if (me.photoURL && /^https:\/\/[^/]+\.googleusercontent\.com\//.test(me.photoURL)) {
+        const img = document.createElement('img'); img.src = me.photoURL; img.alt = ''; img.referrerPolicy = 'no-referrer'; img.onerror = () => img.remove(); icon.append(img);
+      }
+      label.append(icon, document.createTextNode(me.name));
+    }
     root.querySelector<HTMLElement>('#embed-game')!.hidden = false;
     const pattern = getPattern(view.pattern);
     root.querySelector('#embed-pattern')!.textContent = pattern.name;

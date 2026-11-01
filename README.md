@@ -111,3 +111,6 @@ The solo invitation form and completed invitation (QR, link, Invite and Leave) r
 
 
 Bingo review and untouched-round entry: all 37 multiplayer emulator checks passed, including the real fifteen-second deadline, early-confirm/late-undo rejection, concurrent confirmation retries, winning-roll undo, immediate deals and first-roll/join races. A review holds the original pattern, prize, cards and marks. No new roll is accepted while pending. Undo restores the pre-roll state and cancels the pending win; after confirmation, prizes and the new round are final. Confirmation is automatic from connected clients; if all are offline, it completes on reconnect.
+# Google identity integration (released November 1, 2026)
+
+Embedded Bingo accepts the hub's verified display name and Google profile photo, with initials as a fallback. Account ownership stays in the hub and Rewards; Bingo has no separate Google login. Signing in preserves the central player ID and existing card, updates its profile, and requires a fresh browser handoff. Award settlement uses the central ID and lets Rewards assign permanent ownership. Standalone guest behavior is unchanged. Functions and Hosting are deployed. Real Google sign-in retained the existing session and all 25 card values; see the sibling hub's `docs/RELEASE-2026-11-01-GOOGLE.md` for release evidence and limits.
